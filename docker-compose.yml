@@ -1,6 +1,6 @@
 services:
   media-subtitle-manager:
-    image: <YOUR_DOCKERHUB_USERNAME>/media-subtitle-manager:latest
+    image: alcyoned/media-subtitle-manager:latest
     container_name: media-subtitle-manager
     ports:
       - "8080:8080"
