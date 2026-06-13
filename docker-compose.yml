@@ -1,0 +1,14 @@
+services:
+  media-subtitle-manager:
+    image: <YOUR_DOCKERHUB_USERNAME>/media-subtitle-manager:latest
+    container_name: media-subtitle-manager
+    ports:
+      - "8080:8080"
+    environment:
+      - PUID=1000 # 사용자의 Synology NAS UID에 맞게 수정 가능
+      - PGID=1000 # 사용자의 Synology NAS GID에 맞게 수정 가능
+      - TZ=Asia/Seoul
+    volumes:
+      # Synology NAS 미디어 공유 폴더 마운트 (요구사항 필수 지정)
+      - /volume1/video:/media
+    restart: always

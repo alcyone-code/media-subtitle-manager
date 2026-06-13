@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Media 자막 관리 시스템</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="background-decor">
+        <div class="circle circle-1"></div>
+        <div class="circle circle-2"></div>
+    </div>
+    
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="brand">
+                <i class="fa-solid fa-closed-captioning brand-icon"></i>
+                <div class="brand-text">
+                    <h1>Media Subtitle Manager</h1>
+                    <p>Synology NAS용 자막 매칭 및 변환 웹 대시보드</p>
+                </div>
+            </div>
+            <div class="system-status">
+                <span class="status-indicator online"></span>
+                <span class="status-label">서버 연결됨</span>
+            </div>
+        </header>
+
+        <!-- Main Workspace -->
+        <main class="app-workspace">
+            
+            <!-- Left Panel: Folder Browser -->
+            <section class="panel panel-left glass">
+                <div class="panel-header">
+                    <h2><i class="fa-solid fa-folder-open"></i> 미디어 폴더 브라우저</h2>
+                </div>
+                
+                <div class="path-navigation">
+                    <button id="btn-nav-up" class="btn-icon" title="상위 폴더로 이동"><i class="fa-solid fa-arrow-up"></i></button>
+                    <span id="txt-current-path" class="path-text">/media</span>
+                </div>
+
+                <div class="browser-content">
+                    <ul id="folder-list" class="folder-list">
+                        <!-- 동적으로 폴더 리스트가 생성됩니다 -->
+                        <li class="loading-item"><i class="fa-solid fa-spinner fa-spin"></i> 로딩 중...</li>
+                    </ul>
+                </div>
+                
+                <div class="panel-footer">
+                    <button id="btn-select-target" class="btn btn-primary btn-full">
+                        <i class="fa-solid fa-check-double"></i> 현재 폴더 선택
+                    </button>
+                </div>
+            </section>
+
+            <!-- Right Panel: Controls & Content -->
+            <section class="panel panel-right">
+                
+                <!-- Selected Folder Display Card -->
+                <div class="selected-target-card glass">
+                    <div class="target-info">
+                        <span class="info-label">선택된 폴더</span>
+                        <h3 id="txt-selected-path" class="info-value">대상을 선택해 주세요</h3>
+                    </div>
+                </div>
+
+                <!-- Tabs & Controls -->
+                <div class="controls-card glass">
+                    <div class="tab-header">
+                        <button id="tab-match" class="tab-btn active"><i class="fa-solid fa-wand-magic-sparkles"></i> 자막 파일명 자동 매칭</button>
+                        <button id="tab-convert" class="tab-btn"><i class="fa-solid fa-rotate"></i> SMI ➡️ SRT 일괄 변환</button>
+                    </div>
+                    
+                    <div class="tab-content">
+                        <!-- Match Tab Content -->
+                        <div id="content-match" class="tab-pane active">
+                            <p class="tab-desc">선택된 폴더와 그 하위 폴더들을 탐색하여 동영상 파일명과 동일하게 자막 파일명을 변경합니다. (폴더별 독립 매칭 & 에피소드 정렬 예외 처리 적용)</p>
+                            <div class="btn-group">
+                                <button id="btn-match-preview" class="btn btn-primary" disabled>
+                                    <i class="fa-solid fa-magnifying-glass"></i> 매칭 미리보기 분석
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Convert Tab Content -->
+                        <div id="content-convert" class="tab-pane">
+                            <p class="tab-desc">선택된 폴더 내의 모든 SMI 자막 파일을 UTF-8 인코딩 기반의 SRT 파일로 파싱하고 생성합니다.</p>
+                            <div class="convert-options">
+                                <label class="checkbox-container">
+                                    <input type="checkbox" id="chk-remove-smi">
+                                    <span class="checkmark"></span>
+                                    변환 성공 시 원본 SMI 파일 삭제
+                                </label>
+                                <div class="select-container">
+                                    <label for="sel-srt-ext">출력 자막 파일명 포맷:</label>
+                                    <select id="sel-srt-ext">
+                                        <option value="srt">동영상과 동일 확장자 (.srt)</option>
+                                        <option value="ko.srt">한국어 자막 지정 (.ko.srt)</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="btn-group">
+                                <button id="btn-convert-run" class="btn btn-warning" disabled>
+                                    <i class="fa-solid fa-play"></i> SMI ➡️ SRT 일괄 변환 실행
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Preview Area -->
+                <div id="preview-section" class="preview-card glass hidden">
+                    <div class="preview-header">
+                        <h3><i class="fa-solid fa-eye"></i> 매칭 결과 미리보기</h3>
+                        <span class="badge" id="txt-preview-count">0개 매칭됨</span>
+                    </div>
+                    
+                    <div class="preview-container">
+                        <!-- 폴더 그룹 단위로 렌더링될 영역 -->
+                        <div id="preview-list"></div>
+                    </div>
+                    
+                    <div class="preview-footer">
+                        <button id="btn-execute-sync" class="btn btn-success">
+                            <i class="fa-solid fa-file-signature"></i> 자막 파일명 일괄 변경 적용
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Terminal-like Log Area -->
+                <div class="terminal-card glass">
+                    <div class="terminal-header">
+                        <div class="terminal-dots">
+                            <span class="dot red"></span>
+                            <span class="dot yellow"></span>
+                            <span class="dot green"></span>
+                        </div>
+                        <span class="terminal-title">실시간 백엔드 프로세스 로그</span>
+                        <button id="btn-clear-log" class="btn-text-icon" title="로그 지우기"><i class="fa-solid fa-trash-can"></i> 지우기</button>
+                    </div>
+                    <div id="terminal-console" class="terminal-console">
+                        <div class="log-line system-msg">실시간 시스템 로그 서비스가 시작되었습니다. 작업을 실행해 주세요.</div>
+                    </div>
+                </div>
+
+            </section>
+        </main>
+        
+        <!-- Footer -->
+        <footer class="app-footer">
+            <p>&copy; 2026 Media Subtitle Manager. Designed for Synology NAS Docker environment.</p>
+        </footer>
+    </div>
+    
+    <script src="app.js"></script>
+</body>
+</html>
