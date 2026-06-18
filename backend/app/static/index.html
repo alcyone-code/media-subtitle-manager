@@ -113,6 +113,36 @@
                                     <i class="fa-solid fa-play"></i> SMI ➡️ SRT 일괄 변환 실행
                                 </button>
                             </div>
+
+                            <!-- 변환 진행도 및 결과 표시 영역 -->
+                            <div id="convert-progress-area" class="convert-progress-container hidden">
+                                <div class="progress-info">
+                                    <span id="progress-text">작업 대기 중...</span>
+                                    <span id="progress-percentage">0%</span>
+                                </div>
+                                <div class="progress-bar-bg">
+                                    <div id="progress-bar-fill" class="progress-bar-fill" style="width: 0%;"></div>
+                                </div>
+                                
+                                <div id="convert-result-summary" class="convert-result-summary hidden">
+                                    <span class="badge success" id="badge-success">성공: 0</span>
+                                    <span class="badge danger" id="badge-fail">실패: 0</span>
+                                </div>
+                                
+                                <div id="convert-fail-list-container" class="convert-fail-list-container hidden">
+                                    <h4><i class="fa-solid fa-triangle-exclamation"></i> 실패 내역</h4>
+                                    <table class="fail-table">
+                                        <thead>
+                                            <tr>
+                                                <th>파일명</th>
+                                                <th>경로 / 에러 사유</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="convert-fail-list">
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>

@@ -57,7 +57,26 @@ function initSSE() {
     state.eventSource = new EventSource('/api/logs/stream');
     
     state.eventSource.onmessage = (event) => {
-        appendLog(event.data);
+        const msg = event.data;
+        if (!msg) return;
+
+        if (msg.startsWith('[PROGRESS] ')) {
+            try {
+                const data = JSON.parse(msg.substring(11));
+                updateProgressUI(data);
+            } catch (e) {
+                appendLog(msg);
+            }
+        } else if (msg.startsWith('[RESULT] ')) {
+            try {
+                const data = JSON.parse(msg.substring(9));
+                showResultUI(data);
+            } catch (e) {
+                appendLog(msg);
+            }
+        } else {
+            appendLog(msg);
+        }
     };
     
     state.eventSource.onerror = (err) => {
@@ -315,6 +334,17 @@ function initActionEvents() {
         
         appendLog(`[SYSTEM] SMI to SRT 일괄 변환 요청 전송됨: ${state.selectedPath}`);
         
+        // 변환 UI 초기화
+        const progressArea = document.getElementById('convert-progress-area');
+        if (progressArea) {
+            progressArea.classList.remove('hidden');
+            document.getElementById('progress-percentage').textContent = '0%';
+            document.getElementById('progress-text').textContent = '작업 대기 중...';
+            document.getElementById('progress-bar-fill').style.width = '0%';
+            document.getElementById('convert-result-summary').classList.add('hidden');
+            document.getElementById('convert-fail-list-container').classList.add('hidden');
+        }
+        
         try {
             const response = await fetch('/api/convert', {
                 method: 'POST',
@@ -461,10 +491,72 @@ window.moveSubtitle = function(groupIdx, itemIdx, direction) {
     updateItemMatchStatus(currentItem);
     updateItemMatchStatus(targetItem);
     
-    // 화면 다시 렌더링
+    // 최종 정렬 후 상태 갱신
     renderGroupRows(groupIdx);
     appendLog(`[SYSTEM] 수동 정렬 조정됨: [${group.relative_path}] 폴더 내의 에피소드 정렬 재배치`);
 };
+
+// --- SMI 변환 Progress UI 헬퍼 함수 ---
+function updateProgressUI(data) {
+    const progressArea = document.getElementById('convert-progress-area');
+    if (!progressArea) return;
+    
+    const percentEl = document.getElementById('progress-percentage');
+    const textEl = document.getElementById('progress-text');
+    const fillEl = document.getElementById('progress-bar-fill');
+    
+    progressArea.classList.remove('hidden');
+    document.getElementById('convert-result-summary').classList.add('hidden');
+    document.getElementById('convert-fail-list-container').classList.add('hidden');
+    
+    const percent = Math.round((data.current / data.total) * 100) || 0;
+    
+    percentEl.textContent = `${percent}%`;
+    textEl.textContent = `[${data.current} / ${data.total}] 변환 중: ${data.current_file}`;
+    fillEl.style.width = `${percent}%`;
+}
+
+function showResultUI(data) {
+    const progressArea = document.getElementById('convert-progress-area');
+    if (!progressArea) return;
+    
+    const percentEl = document.getElementById('progress-percentage');
+    const textEl = document.getElementById('progress-text');
+    const fillEl = document.getElementById('progress-bar-fill');
+    const summaryArea = document.getElementById('convert-result-summary');
+    const failContainer = document.getElementById('convert-fail-list-container');
+    const failList = document.getElementById('convert-fail-list');
+    const badgeSuccess = document.getElementById('badge-success');
+    const badgeFail = document.getElementById('badge-fail');
+    
+    progressArea.classList.remove('hidden');
+    
+    percentEl.textContent = '100%';
+    textEl.textContent = '모든 파일 변환 처리가 완료되었습니다.';
+    fillEl.style.width = '100%';
+    
+    summaryArea.classList.remove('hidden');
+    badgeSuccess.textContent = `성공: ${data.success_count}`;
+    badgeFail.textContent = `실패: ${data.fail_count}`;
+    
+    if (data.failures && data.failures.length > 0) {
+        failContainer.classList.remove('hidden');
+        failList.innerHTML = '';
+        data.failures.forEach(f => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td style="font-weight: 500;">${f.file}</td>
+                <td>
+                    <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 4px;">${f.path}</div>
+                    <div style="color: var(--danger);">${f.error}</div>
+                </td>
+            `;
+            failList.appendChild(tr);
+        });
+    } else {
+        failContainer.classList.add('hidden');
+    }
+}
 
 // 스왑 후 항목의 제안된 이름 및 매칭 상태 다시 갱신
 function updateItemMatchStatus(item) {

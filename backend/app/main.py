@@ -1,4 +1,5 @@
 import os
+import json
 import asyncio
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.responses import StreamingResponse, FileResponse
@@ -151,30 +152,66 @@ def execute_matches(req: MatchExecuteRequest):
 # 비동기 SMI 변환 작업 처리 함수
 def run_bulk_conversion(path: str, remove_original: bool, output_format: str, ignore_errors: bool):
     logger.log(f"자막 일괄 변환 작업 시작. 대상 디렉토리: {path}")
-    success_files = []
-    fail_files = []
     
     if not os.path.isdir(path):
         logger.log(f"유효하지 않은 디렉토리 경로입니다: {path}", "ERROR")
         return
 
-    # os.walk를 활용한 SMI 자막 파일 수집
+    # 1단계: 변환 대상 SMI 자막 파일 모두 수집
+    smi_files = []
     for root, dirs, files in os.walk(path):
         for file in files:
             if file.lower().endswith('.smi'):
-                full_path = os.path.join(root, file)
-                success, new_path_or_err = convert_smi_file(
-                    full_path, 
-                    remove_original=remove_original, 
-                    output_format=output_format,
-                    ignore_errors=ignore_errors
-                )
-                if success:
-                    success_files.append(file)
-                else:
-                    fail_files.append((file, new_path_or_err))
-                    
+                smi_files.append(os.path.join(root, file))
+
+    total_count = len(smi_files)
+    if total_count == 0:
+        logger.log("변환할 SMI 파일이 없습니다.")
+        logger.log(f"[RESULT] " + json.dumps({"success_count": 0, "fail_count": 0, "failures": []}, ensure_ascii=False))
+        return
+
+    logger.log(f"총 {total_count}개의 SMI 파일을 변환합니다.")
+
+    success_files = []
+    fail_files = []
+    current_count = 0
+
+    # 2단계: 순회하며 변환 진행 및 프로그레스 로깅
+    for full_path in smi_files:
+        current_count += 1
+        file_name = os.path.basename(full_path)
+        
+        success, new_path_or_err = convert_smi_file(
+            full_path, 
+            remove_original=remove_original, 
+            output_format=output_format,
+            ignore_errors=ignore_errors
+        )
+        
+        if success:
+            success_files.append(file_name)
+        else:
+            fail_files.append({"path": full_path, "file": file_name, "error": new_path_or_err})
+            
+        # 진행률 전송
+        progress_data = {
+            "total": total_count,
+            "current": current_count,
+            "success": len(success_files),
+            "fail": len(fail_files),
+            "current_file": file_name
+        }
+        logger.log(f"[PROGRESS] " + json.dumps(progress_data, ensure_ascii=False))
+
     logger.log(f"자막 일괄 변환 작업 완료. 성공: {len(success_files)}개, 실패: {len(fail_files)}개")
+    
+    # 결과 요약 전송
+    result_data = {
+        "success_count": len(success_files),
+        "fail_count": len(fail_files),
+        "failures": fail_files
+    }
+    logger.log(f"[RESULT] " + json.dumps(result_data, ensure_ascii=False))
 
 
 # API: 자막 일괄 변환 (SMI -> SRT)

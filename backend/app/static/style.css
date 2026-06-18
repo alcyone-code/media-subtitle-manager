@@ -818,6 +818,86 @@ body {
     border-top: 1px solid rgba(255, 255, 255, 0.02);
 }
 
+/* Convert Progress UI */
+.convert-progress-container {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 12px;
+    padding: 20px;
+    margin-top: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    animation: fadeIn 0.3s ease;
+}
+
+.progress-info {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+}
+
+.progress-bar-bg {
+    width: 100%;
+    height: 12px;
+    background-color: rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 16px;
+}
+
+.progress-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--warning), #fde047);
+    border-radius: 6px;
+    transition: width 0.3s ease;
+}
+
+.convert-result-summary {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.convert-fail-list-container {
+    margin-top: 16px;
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: 8px;
+    padding: 16px;
+}
+
+.convert-fail-list-container h4 {
+    margin-top: 0;
+    margin-bottom: 12px;
+    color: var(--danger);
+    font-size: 0.95rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.fail-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+.fail-table th, .fail-table td {
+    padding: 8px 12px;
+    text-align: left;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    color: var(--text-secondary);
+}
+
+.fail-table th {
+    color: var(--text-primary);
+    font-weight: 500;
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.fail-table tr:last-child td {
+    border-bottom: none;
+}
+
 /* Utilities */
 .hidden {
     display: none !important;
