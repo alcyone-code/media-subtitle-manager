@@ -15,6 +15,16 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Calculate App Version
+        id: version
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "version=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          else
+            SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+            echo "version=beta-b${{ github.run_number }}-$SHORT_SHA" >> $GITHUB_OUTPUT
+          fi
+
       - name: Set up QEMU (for multi-platform builds)
         uses: docker/setup-qemu-action@v3
 
@@ -51,6 +61,6 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            APP_VERSION=${{ github.ref_name }}
+            APP_VERSION=${{ steps.version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
