@@ -1,5 +1,9 @@
 FROM python:3.10-slim
 
+# 버전 정보 주입을 위한 ARG 및 ENV 설정
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
+
 # 필요한 패키지 설치 (gosu, shadow - PUID/PGID 처리를 위함)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gosu \

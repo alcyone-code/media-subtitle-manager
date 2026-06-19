@@ -16,6 +16,7 @@ from app.subtitle_utils import (
 )
 
 app = FastAPI(title="Media 자막 관리 시스템")
+APP_VERSION = os.environ.get("APP_VERSION", "dev")
 
 # 기본 미디어 디렉토리 경로 (Synology NAS 마운트 경로 대응)
 DEFAULT_MEDIA_DIR = "/media"
@@ -238,14 +239,16 @@ def convert_subtitles(req: ConvertRequest, background_tasks: BackgroundTasks):
 # API: 실시간 로그 스트리밍 (SSE)
 @app.get("/api/logs/stream")
 async def stream_logs(request: Request):
+    # 비동기 메인 이벤트 루프를 호출 시점에 안전하게 캡처
+    loop = asyncio.get_running_loop()
+
     async def log_generator():
         # 로그 대기 큐 생성
         queue = asyncio.Queue()
         
         # 콜백 리스너 등록
         def listener(msg):
-            # 비동기 이벤트 루프 스레드 안전하게 항목 추가
-            loop = asyncio.get_event_loop()
+            # 캡처한 메인 루프를 통해 스레드 안전하게 항목 추가
             loop.call_soon_threadsafe(queue.put_nowait, msg)
             
         logger.subscribe(listener)
@@ -269,6 +272,12 @@ async def stream_logs(request: Request):
             logger.unsubscribe(listener)
             
     return StreamingResponse(log_generator(), media_type="text/event-stream")
+
+# API: 앱 버전 조회
+@app.get("/api/version")
+def get_version():
+    return {"version": APP_VERSION}
+
 
 static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 os.makedirs(static_dir, exist_ok=True)

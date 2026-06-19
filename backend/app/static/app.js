@@ -37,7 +37,10 @@ const elements = {
     
     // Terminal
     terminalConsole: document.getElementById('terminal-console'),
-    btnClearLog: document.getElementById('btn-clear-log')
+    btnClearLog: document.getElementById('btn-clear-log'),
+    
+    // Version
+    appVersion: document.getElementById('app-version')
 };
 
 // 초기화
@@ -46,6 +49,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initTabs();
     initActionEvents();
     initSSE();
+    loadAppVersion();
 });
 
 // 1. 실시간 로그 수신을 위한 SSE 설정
@@ -60,18 +64,26 @@ function initSSE() {
         const msg = event.data;
         if (!msg) return;
 
-        if (msg.startsWith('[PROGRESS] ')) {
+        console.log("SSE Received:", msg); // 브라우저 디버깅용 로그
+
+        if (msg.includes('[PROGRESS]')) {
             try {
-                const data = JSON.parse(msg.substring(11));
+                const idx = msg.indexOf('[PROGRESS]');
+                const jsonStr = msg.substring(idx + 10).trim();
+                const data = JSON.parse(jsonStr);
                 updateProgressUI(data);
             } catch (e) {
+                console.error("Failed to parse progress JSON:", e);
                 appendLog(msg);
             }
-        } else if (msg.startsWith('[RESULT] ')) {
+        } else if (msg.includes('[RESULT]')) {
             try {
-                const data = JSON.parse(msg.substring(9));
+                const idx = msg.indexOf('[RESULT]');
+                const jsonStr = msg.substring(idx + 8).trim();
+                const data = JSON.parse(jsonStr);
                 showResultUI(data);
             } catch (e) {
+                console.error("Failed to parse result JSON:", e);
                 appendLog(msg);
             }
         } else {
@@ -577,5 +589,20 @@ function updateItemMatchStatus(item) {
         item.proposed_name = '';
         item.proposed_path = '';
         item.status = 'unmatched';
+    }
+}
+
+// 앱 버전 로드 함수
+async function loadAppVersion() {
+    try {
+        const response = await fetch('/api/version');
+        if (response.ok) {
+            const data = await response.json();
+            if (elements.appVersion) {
+                elements.appVersion.textContent = data.version;
+            }
+        }
+    } catch (error) {
+        console.error("Failed to load app version:", error);
     }
 }
