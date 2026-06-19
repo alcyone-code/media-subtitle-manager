@@ -64,18 +64,26 @@ function initSSE() {
         const msg = event.data;
         if (!msg) return;
 
-        if (msg.startsWith('[PROGRESS] ')) {
+        console.log("SSE Received:", msg); // 브라우저 디버깅용 로그
+
+        if (msg.includes('[PROGRESS]')) {
             try {
-                const data = JSON.parse(msg.substring(11));
+                const idx = msg.indexOf('[PROGRESS]');
+                const jsonStr = msg.substring(idx + 10).trim();
+                const data = JSON.parse(jsonStr);
                 updateProgressUI(data);
             } catch (e) {
+                console.error("Failed to parse progress JSON:", e);
                 appendLog(msg);
             }
-        } else if (msg.startsWith('[RESULT] ')) {
+        } else if (msg.includes('[RESULT]')) {
             try {
-                const data = JSON.parse(msg.substring(9));
+                const idx = msg.indexOf('[RESULT]');
+                const jsonStr = msg.substring(idx + 8).trim();
+                const data = JSON.parse(jsonStr);
                 showResultUI(data);
             } catch (e) {
+                console.error("Failed to parse result JSON:", e);
                 appendLog(msg);
             }
         } else {

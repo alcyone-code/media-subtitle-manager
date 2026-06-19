@@ -21,7 +21,12 @@ class Logger:
             self.listeners.remove(callback)
 
     def log(self, message: str, level: str = "INFO"):
-        formatted_message = f"[{level}] {message}"
+        # 프로그레스나 결과 JSON 메시지는 레벨 접두사를 붙이지 않고 원본 그대로 전송
+        if message.startswith("[PROGRESS]") or message.startswith("[RESULT]"):
+            formatted_message = message
+        else:
+            formatted_message = f"[{level}] {message}"
+        
         print(formatted_message)
         for listener in self.listeners:
             try:
