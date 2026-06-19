@@ -37,7 +37,10 @@ const elements = {
     
     // Terminal
     terminalConsole: document.getElementById('terminal-console'),
-    btnClearLog: document.getElementById('btn-clear-log')
+    btnClearLog: document.getElementById('btn-clear-log'),
+    
+    // Version
+    appVersion: document.getElementById('app-version')
 };
 
 // 초기화
@@ -46,6 +49,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initTabs();
     initActionEvents();
     initSSE();
+    loadAppVersion();
 });
 
 // 1. 실시간 로그 수신을 위한 SSE 설정
@@ -577,5 +581,20 @@ function updateItemMatchStatus(item) {
         item.proposed_name = '';
         item.proposed_path = '';
         item.status = 'unmatched';
+    }
+}
+
+// 앱 버전 로드 함수
+async function loadAppVersion() {
+    try {
+        const response = await fetch('/api/version');
+        if (response.ok) {
+            const data = await response.json();
+            if (elements.appVersion) {
+                elements.appVersion.textContent = data.version;
+            }
+        }
+    } catch (error) {
+        console.error("Failed to load app version:", error);
     }
 }

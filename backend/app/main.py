@@ -16,6 +16,7 @@ from app.subtitle_utils import (
 )
 
 app = FastAPI(title="Media 자막 관리 시스템")
+APP_VERSION = os.environ.get("APP_VERSION", "dev")
 
 # 기본 미디어 디렉토리 경로 (Synology NAS 마운트 경로 대응)
 DEFAULT_MEDIA_DIR = "/media"
@@ -269,6 +270,12 @@ async def stream_logs(request: Request):
             logger.unsubscribe(listener)
             
     return StreamingResponse(log_generator(), media_type="text/event-stream")
+
+# API: 앱 버전 조회
+@app.get("/api/version")
+def get_version():
+    return {"version": APP_VERSION}
+
 
 static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 os.makedirs(static_dir, exist_ok=True)
