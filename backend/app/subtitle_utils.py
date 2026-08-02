@@ -42,6 +42,50 @@ def natural_sort_key(s: str) -> List[Any]:
     """
     return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
 
+
+def extract_episode_number(filename: str) -> int | None:
+    """
+    파일명에서 일반적인 회차 번호를 추출한다.
+    """
+    name = os.path.splitext(os.path.basename(filename))[0]
+    patterns = [
+        r'(?i)S\d{1,2}E0*(\d{1,3})(?!\d)',
+        r'(?i)\bEP\s*0*(\d{1,3})(?!\d)',
+        r'#\s*0*(\d{1,3})(?!\d)',
+        r'제\s*0*(\d{1,3})\s*화',
+        r'0*(\d{1,3})\s*화',
+        r'(?<!\d)[-_ .]0*(\d{1,3})(?=[-_ .\]\)])',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, name)
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def build_episode_maps(paths: List[str]) -> Tuple[Dict[int, str], List[str]]:
+    """
+    회차 번호를 유일하게 추출할 수 있는 파일과 기존 정렬 fallback 대상 파일을 분리한다.
+    """
+    grouped: Dict[int, List[str]] = {}
+    fallback = []
+    for file_path in paths:
+        episode = extract_episode_number(file_path)
+        if episode is None:
+            fallback.append(file_path)
+        else:
+            grouped.setdefault(episode, []).append(file_path)
+
+    unique: Dict[int, str] = {}
+    for episode, episode_paths in grouped.items():
+        episode_paths.sort(key=lambda x: natural_sort_key(os.path.basename(x)))
+        if len(episode_paths) == 1:
+            unique[episode] = episode_paths[0]
+        else:
+            fallback.extend(episode_paths)
+    fallback.sort(key=lambda x: natural_sort_key(os.path.basename(x)))
+    return unique, fallback
+
 # ==========================================
 # SMI to SRT 파싱 및 변환 로직 (pysmi2srt 이식)
 # ==========================================
@@ -234,11 +278,12 @@ def scan_media_folder(root_dir: str) -> List[Dict[str, Any]]:
         # 동영상이나 자막이 하나라도 있으면 그룹 생성
         if videos or subtitles:
             match_pairs = []
-            max_len = max(len(videos), len(subtitles))
+            video_by_episode, fallback_videos = build_episode_maps(videos)
+            subtitle_by_episode, fallback_subtitles = build_episode_maps(subtitles)
             
-            for i in range(max_len):
-                video_path = videos[i] if i < len(videos) else None
-                subtitle_path = subtitles[i] if i < len(subtitles) else None
+            for episode in sorted(set(video_by_episode) | set(subtitle_by_episode)):
+                video_path = video_by_episode.get(episode)
+                subtitle_path = subtitle_by_episode.get(episode)
                 
                 proposed_name = ""
                 proposed_path = ""
@@ -249,7 +294,31 @@ def scan_media_folder(root_dir: str) -> List[Dict[str, Any]]:
                     proposed_path = os.path.join(p, proposed_name)
                 
                 match_pairs.append({
-                    "id": i,
+                    "id": len(match_pairs),
+                    "video_path": video_path,
+                    "video_name": os.path.basename(video_path) if video_path else "",
+                    "subtitle_path": subtitle_path,
+                    "subtitle_name": os.path.basename(subtitle_path) if subtitle_path else "",
+                    "proposed_name": proposed_name,
+                    "proposed_path": proposed_path,
+                    "status": "ready" if (video_path and subtitle_path and os.path.basename(subtitle_path) != proposed_name) else "synced" if (video_path and subtitle_path) else "unmatched"
+                })
+
+            max_len = max(len(fallback_videos), len(fallback_subtitles))
+            for i in range(max_len):
+                video_path = fallback_videos[i] if i < len(fallback_videos) else None
+                subtitle_path = fallback_subtitles[i] if i < len(fallback_subtitles) else None
+                
+                proposed_name = ""
+                proposed_path = ""
+                if video_path and subtitle_path:
+                    video_base = os.path.splitext(os.path.basename(video_path))[0]
+                    sub_ext = os.path.splitext(os.path.basename(subtitle_path))[1]
+                    proposed_name = f"{video_base}{sub_ext}"
+                    proposed_path = os.path.join(p, proposed_name)
+                
+                match_pairs.append({
+                    "id": len(match_pairs),
                     "video_path": video_path,
                     "video_name": os.path.basename(video_path) if video_path else "",
                     "subtitle_path": subtitle_path,

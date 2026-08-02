@@ -41,3 +41,5 @@ htmlcov/
 *.log
 local_test/
 temp/
+test-fixtures/
+
