@@ -35,7 +35,7 @@ class MatchExecuteRequest(BaseModel):
 class ConvertRequest(BaseModel):
     path: str
     remove_original: bool = False
-    output_format: str = "srt"  # "srt" 또는 "ko.srt"
+    output_format: str = "ko.srt"  # "ko.srt" 또는 "srt"
     ignore_errors: bool = True
 
 

@@ -1,6 +1,5 @@
 import os
 import re
-import codecs
 from typing import List, Dict, Any, Tuple
 from charset_normalizer import detect
 
@@ -226,7 +225,7 @@ def convert_to_srt_format(data: List[Dict[str, Any]], lang: str = 'KRCC') -> str
             continue
     return srt
 
-def convert_smi_file(smi_path: str, remove_original: bool = False, output_format: str = "srt", ignore_errors: bool = True) -> Tuple[bool, str]:
+def convert_smi_file(smi_path: str, remove_original: bool = False, output_format: str = "ko.srt", ignore_errors: bool = True) -> Tuple[bool, str]:
     """
     단일 SMI 자막 파일을 인코딩 자동 감지하여 UTF-8 SRT로 변환
     """
@@ -263,7 +262,7 @@ def convert_smi_file(smi_path: str, remove_original: bool = False, output_format
         new_path = os.path.join(dir_name, new_filename)
         
         # UTF-8 파일로 쓰기
-        with codecs.open(new_path, 'w', encoding='utf-8') as srt_file:
+        with open(new_path, 'w', encoding='utf-8') as srt_file:
             srt_file.write(srt_content)
             
         logger.log(f"변환 완료 및 저장됨: {new_path}")
