@@ -249,7 +249,7 @@ function initActionEvents() {
                 totalMatches += group.matches.filter(m => m.subtitle_path && m.video_path).length;
             });
             
-            elements.txtPreviewCount.textContent = `${totalMatches}개 파일 매칭 예정`;
+            elements.txtPreviewCount.textContent = `자막 ${totalMatches}개 매칭 예정`;
             
             renderPreview();
             
@@ -427,6 +427,8 @@ function renderGroupRows(groupIdx) {
             statusBadge = `<span class="status-badge status-ready">변경대기</span>`;
         } else if (item.status === 'synced') {
             statusBadge = `<span class="status-badge status-synced">동기화됨</span>`;
+        } else if (item.status === 'conflict') {
+            statusBadge = `<span class="status-badge status-conflict">중복 이름</span>`;
         } else {
             statusBadge = `<span class="status-badge status-unmatched">미매칭</span>`;
         }
@@ -582,14 +584,29 @@ function showResultUI(data) {
 }
 
 // 스왑 후 항목의 제안된 이름 및 매칭 상태 다시 갱신
+function getSubtitleLangSuffix(subtitleName) {
+    // 백엔드(_get_subtitle_lang_suffix)와 동일한 규칙: .ko, .en 등 언어 코드 유지
+    const languageCodes = ['ko', 'kor', 'kr', 'en', 'eng', 'ja', 'jpn', 'jp', 'zh', 'zho', 'chi', 'chs', 'cht', 'sc', 'tc'];
+    const stem = subtitleName.substring(0, subtitleName.lastIndexOf('.')) || subtitleName;
+    const match = stem.match(/\.([A-Za-z]{2,3})$/);
+    if (match && languageCodes.includes(match[1].toLowerCase())) {
+        return match[0];
+    }
+    return '';
+}
+
 function updateItemMatchStatus(item) {
     if (item.video_path && item.subtitle_path) {
         const videoBase = item.video_name.substring(0, item.video_name.lastIndexOf('.')) || item.video_name;
         const subExt = item.subtitle_name.substring(item.subtitle_name.lastIndexOf('.')) || '';
-        item.proposed_name = `${videoBase}${subExt}`;
+        const langSuffix = getSubtitleLangSuffix(item.subtitle_name);
+        item.proposed_name = `${videoBase}${langSuffix}${subExt}`;
         
-        const dirPath = item.subtitle_path.substring(0, item.subtitle_path.lastIndexOf('/'));
-        item.proposed_path = `${dirPath}/${item.proposed_name}`;
+        // 경로 구분자는 OS에 따라 다르므로 원본 경로의 구분자를 그대로 사용한다
+        const lastSeparator = Math.max(item.subtitle_path.lastIndexOf('/'), item.subtitle_path.lastIndexOf('\\'));
+        const dirPath = lastSeparator >= 0 ? item.subtitle_path.substring(0, lastSeparator) : '';
+        const separator = item.subtitle_path.includes('\\') ? '\\' : '/';
+        item.proposed_path = `${dirPath}${separator}${item.proposed_name}`;
         
         if (item.subtitle_name === item.proposed_name) {
             item.status = 'synced';

@@ -312,13 +312,40 @@ def get_files_in_directory(dir_path: str) -> Tuple[List[str], List[str]]:
     
     return videos, subtitles
 
+def _get_subtitle_lang_suffix(path: str) -> str:
+    """
+    자막 파일명에 붙은 언어 코드 접미사를 반환한다. (예: "Show - 01.ko.srt" -> ".ko")
+    """
+    stem = os.path.splitext(os.path.basename(path))[0]
+    match = _LANGUAGE_SUFFIX_PATTERN.search(stem)
+    if match and match.group(1).lower() in LANGUAGE_SUFFIXES:
+        return match.group(0)
+    return ""
+
+
+def _build_proposed_name(video_path: str, subtitle_path: str) -> str:
+    """
+    동영상 파일명 기준의 자막 제안 이름.
+    언어 코드(.ko, .en 등)는 유지하여 같은 회차의 다국어 자막이 서로 덮어쓰지 않게 한다.
+    """
+    video_base = os.path.splitext(os.path.basename(video_path))[0]
+    lang_suffix = _get_subtitle_lang_suffix(subtitle_path)
+    sub_ext = os.path.splitext(os.path.basename(subtitle_path))[1]
+    return f"{video_base}{lang_suffix}{sub_ext}"
+
+
 def _row_sort_key(row: Dict[str, Any]) -> List[Any]:
     """
-    동영상이 있는 행을 파일명 순으로 먼저, 동영상이 없는(자막만 있는) 행을 뒤로 정렬
+    동영상이 있는 행을 파일명 순으로 먼저, 동영상이 없는(자막만 있는) 행을 뒤로 정렬.
+    같은 동영상에 자막이 여러 개면 자막 파일명 순으로 정렬한다.
     """
     if row["video_path"]:
-        return [(0, '')] + safe_natural_sort_key(os.path.basename(row["video_path"]))
-    return [(1, '')] + safe_natural_sort_key(os.path.basename(row["subtitle_path"] or ""))
+        return (
+            0,
+            safe_natural_sort_key(os.path.basename(row["video_path"])),
+            safe_natural_sort_key(row["subtitle_name"]),
+        )
+    return (1, [], safe_natural_sort_key(row["subtitle_name"]))
 
 
 def _make_match_pair(
@@ -329,13 +356,12 @@ def _make_match_pair(
 ) -> Dict[str, Any]:
     """
     매칭 결과 한 행(동영상/자막 쌍)을 생성한다.
+    하나의 동영상에 여러 자막(.smi, .srt 등)이 연결될 수 있다.
     """
     proposed_name = ""
     proposed_path = ""
     if video_path and subtitle_path:
-        video_base = os.path.splitext(os.path.basename(video_path))[0]
-        sub_ext = os.path.splitext(os.path.basename(subtitle_path))[1]
-        proposed_name = f"{video_base}{sub_ext}"
+        proposed_name = _build_proposed_name(video_path, subtitle_path)
         proposed_path = os.path.join(directory, proposed_name)
         status = "synced" if os.path.basename(subtitle_path) == proposed_name else "ready"
         match_method = method
@@ -360,46 +386,62 @@ def build_match_pairs(directory: str, videos: List[str], subtitles: List[str]) -
     """
     한 폴더의 동영상/자막을 다음 3단계로 매칭한다.
 
-      1) 확장자만 다른 동일 파일명            (가장 확실)
-      2) 양쪽 모두 유일하게 추출된 회차 번호   (신뢰도 높음)
-      3) 남은 파일끼리 자연어 정렬 순서 1:1    (main 브랜치의 기존 동작)
+      1) 확장자/언어 코드만 다른 동일 파일명                 (가장 확실)
+      2) 동영상 쪽에서 유일하게 추출된 회차 번호              (신뢰도 높음)
+      3) 남은 파일끼리 자연어 정렬 순서 1:1                   (main 브랜치의 기존 동작)
 
-    각 단계는 "아직 매칭되지 않고 남은 파일"만 대상으로 삼는다.
-    따라서 어느 한 단계에서 한쪽만 인식되더라도 파일이 고립되지 않고
-    다음 단계에서 반드시 매칭 기회를 얻는다.
+    동영상 1개에 자막 여러 개(.smi + .srt + .ko.srt 등)가 붙을 수 있다.
+    각 단계는 "아직 매칭되지 않고 남은 자막"만 대상으로 삼으므로,
+    어느 한 단계에서 한쪽만 인식되더라도 파일이 고립되지 않는다.
     """
     remaining_videos = sorted(videos, key=lambda x: natural_sort_key(os.path.basename(x)))
     remaining_subtitles = sorted(subtitles, key=lambda x: natural_sort_key(os.path.basename(x)))
     pairs: List[Tuple[str | None, str | None, str]] = []
+    matched_videos: set = set()  # 자막이 하나라도 연결된 동영상
 
     # 1단계: 언어 코드만 다른 동일 파일명 (예: "Show - 01.mkv" <-> "Show - 01.ko.srt")
-    videos_by_key: Dict[str, List[str]] = {}
+    exact_video_by_stem: Dict[str, str] = {}
+    video_by_stem_key: Dict[str, str] = {}
     for video_path in remaining_videos:
-        videos_by_key.setdefault(get_stem_key(video_path), []).append(video_path)
+        stem = os.path.splitext(os.path.basename(video_path))[0].strip().lower()
+        exact_video_by_stem.setdefault(stem, video_path)
+        video_by_stem_key.setdefault(get_stem_key(video_path), video_path)
 
     for subtitle_path in list(remaining_subtitles):
-        candidates = videos_by_key.get(get_stem_key(subtitle_path))
-        if not candidates:
+        subtitle_stem = os.path.splitext(os.path.basename(subtitle_path))[0].strip().lower()
+        video_path = exact_video_by_stem.get(subtitle_stem)
+        if not video_path:
+            video_path = video_by_stem_key.get(get_stem_key(subtitle_path))
+        if not video_path:
             continue
-        video_path = candidates.pop(0)
-        remaining_videos.remove(video_path)
-        remaining_subtitles.remove(subtitle_path)
         pairs.append((video_path, subtitle_path, MATCH_METHOD_BASENAME))
+        matched_videos.add(video_path)
+        remaining_subtitles.remove(subtitle_path)
 
-    # 2단계: 회차 번호 — 양쪽 모두 "유일하게" 추출된 회차만 사용
+    # 2단계: 회차 번호 — 동영상은 회차별로 유일해야 하고, 자막은 여러 개 허용
     video_by_episode = build_unique_episode_map(remaining_videos)
-    subtitle_by_episode = build_unique_episode_map(remaining_subtitles)
+    subtitle_by_episode: Dict[int, List[str]] = {}
+    for subtitle_path in remaining_subtitles:
+        episode = extract_episode_number(subtitle_path)
+        if episode is not None:
+            subtitle_by_episode.setdefault(episode, []).append(subtitle_path)
+
     for episode in sorted(set(video_by_episode) & set(subtitle_by_episode)):
         video_path = video_by_episode[episode]
-        subtitle_path = subtitle_by_episode[episode]
-        remaining_videos.remove(video_path)
-        remaining_subtitles.remove(subtitle_path)
-        pairs.append((video_path, subtitle_path, MATCH_METHOD_EPISODE))
+        episode_subtitles = sorted(
+            subtitle_by_episode[episode],
+            key=lambda x: natural_sort_key(os.path.basename(x)),
+        )
+        for subtitle_path in episode_subtitles:
+            pairs.append((video_path, subtitle_path, MATCH_METHOD_EPISODE))
+            remaining_subtitles.remove(subtitle_path)
+        matched_videos.add(video_path)
 
-    # 3단계: 남은 파일은 자연어 정렬 순서대로 1:1 대응 (main 브랜치 동작)
-    max_len = max(len(remaining_videos), len(remaining_subtitles))
+    # 3단계: 아직 자막이 없는 동영상과 남은 자막을 자연어 정렬 순서대로 1:1 대응
+    leftover_videos = [video_path for video_path in remaining_videos if video_path not in matched_videos]
+    max_len = max(len(leftover_videos), len(remaining_subtitles))
     for i in range(max_len):
-        video_path = remaining_videos[i] if i < len(remaining_videos) else None
+        video_path = leftover_videos[i] if i < len(leftover_videos) else None
         subtitle_path = remaining_subtitles[i] if i < len(remaining_subtitles) else None
         pairs.append((video_path, subtitle_path, MATCH_METHOD_ORDER))
 
@@ -426,6 +468,29 @@ def build_match_pairs(directory: str, videos: List[str], subtitles: List[str]) -
         for video_path, subtitle_path, method in pairs
     ]
     rows.sort(key=_row_sort_key)
+
+    # 같은 경로로 이름이 겹치는 자막은 자동 변경하지 않는다.
+    # (예: 언어 코드가 없는 같은 확장자 자막 2개 -> 한쪽이 조용히 실패하는 것을 방지)
+    claims: Dict[str, List[Dict[str, Any]]] = {}
+    for row in rows:
+        if row["proposed_path"]:
+            claims.setdefault(row["proposed_path"].lower(), []).append(row)
+
+    for target_path, claimed_rows in claims.items():
+        if len(claimed_rows) < 2:
+            continue
+        already_synced = [row for row in claimed_rows if row["subtitle_name"] == row["proposed_name"]]
+        losers = [row for row in claimed_rows if row is not already_synced[0]] if len(already_synced) == 1 else claimed_rows
+        for row in losers:
+            row["status"] = "conflict"
+            row["proposed_name"] = ""
+            row["proposed_path"] = ""
+        logger.log(
+            f"경고: 같은 이름으로 변경될 자막이 있어 자동 변경에서 제외했습니다: "
+            f"{os.path.basename(target_path)} ({directory})",
+            "WARN",
+        )
+
     for index, row in enumerate(rows):
         row["id"] = index
 

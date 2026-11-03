@@ -36,14 +36,13 @@ def flatten(groups):
 
 
 def assert_invariants(rows, videos, subtitles):
-    """모든 파일이 정확히 한 번씩 등장하고, 중복 매칭이 없어야 한다."""
+    """자막은 정확히 한 번씩, 동영상은 최소 한 번씩 등장해야 한다."""
     used_videos = [os.path.basename(row["video_path"]) for row in rows if row["video_path"]]
     used_subtitles = [os.path.basename(row["subtitle_path"]) for row in rows if row["subtitle_path"]]
 
-    assert len(used_videos) == len(set(used_videos)), "동영상이 중복 매칭되었습니다"
     assert len(used_subtitles) == len(set(used_subtitles)), "자막이 중복 매칭되었습니다"
-    assert sorted(videos) == sorted(used_videos), "동영상 누락/추가 발생"
     assert sorted(subtitles) == sorted(used_subtitles), "자막 누락/추가 발생"
+    assert set(used_videos) == set(videos), "동영상 누락/추가 발생"
 
 
 def assert_never_zero_match(rows, videos, subtitles):
@@ -171,17 +170,18 @@ def test_identical_names_are_synced(tmp_path):
     assert {row["match_method"] for row in rows} == {"basename"}
 
 
-def test_language_suffix_subtitle_is_renamed(tmp_path):
+def test_language_suffix_subtitle_is_preserved(tmp_path):
+    """언어 코드가 붙은 자막은 언어 코드를 유지한 채 동영상 이름에 맞춘다."""
     videos = ["Show - 01.mkv"]
-    subtitles = ["Show - 01.ko.srt"]
+    subtitles = ["Other - 01.ko.srt"]
     create_files(tmp_path, videos + subtitles)
 
     rows = flatten(scan_media_folder(str(tmp_path)))
 
     assert len(rows) == 1
+    assert rows[0]["match_method"] == "episode"
+    assert rows[0]["proposed_name"] == "Show - 01.ko.srt"
     assert rows[0]["status"] == "ready"
-    assert rows[0]["match_method"] == "basename"
-    assert rows[0]["proposed_name"] == "Show - 01.srt"
 
 
 def test_one_side_unparseable_still_matches_by_order():
@@ -219,8 +219,8 @@ def test_mixed_extraction_falls_back_per_file():
 # 경계 상황
 # ---------------------------------------------------------------------------
 
-def test_duplicate_episode_subtitles_do_not_collide():
-    """같은 회차 자막이 여러 개여도 파일이 중복 사용되거나 유실되지 않는다."""
+def test_duplicate_episode_subtitles_all_attach_to_video():
+    """같은 회차 자막이 여러 개(다국어)여도 모두 하나의 동영상에 연결된다."""
     videos = ["Show - 01.mkv"]
     subtitles = ["Show - 01.ko.srt", "Show - 01.en.srt"]
 
@@ -229,7 +229,62 @@ def test_duplicate_episode_subtitles_do_not_collide():
     assert len(rows) == 2
     assert_invariants(rows, videos, subtitles)
     assert_never_zero_match(rows, videos, subtitles)
-    assert sum(row["status"] == "unmatched" for row in rows) == 1
+    assert [row["video_name"] for row in rows] == ["Show - 01.mkv", "Show - 01.mkv"]
+    # 언어 코드가 유지되어 서로 덮어쓰지 않는다
+    assert sorted(row["proposed_name"] for row in rows) == ["Show - 01.en.srt", "Show - 01.ko.srt"]
+    assert {row["status"] for row in rows} == {"synced"}
+
+
+def test_multiple_subtitle_formats_attach_to_same_video(tmp_path):
+    """실제 사고 폴더 형태: mkv 13개 + smi 13개 + ko.srt 13개 -> 26쌍 전부 매칭."""
+    videos = [
+        f"[Erai-raws] Kaoru Hana wa Rin to Saku - {n:02d} "
+        f"[720p NF WEB-DL AVC AAC][MultiSub][{n:08X}].mkv"
+        for n in range(1, 14)
+    ]
+    subtitles = (
+        [f"Kaoru Hana wa Rin to Saku - {n:02d}Erai.smi" for n in range(1, 14)]
+        + [f"Kaoru Hana wa Rin to Saku - {n:02d}Erai.ko.srt" for n in range(1, 14)]
+    )
+    create_files(tmp_path, videos + subtitles)
+
+    rows = flatten(scan_media_folder(str(tmp_path)))
+
+    assert len(rows) == 26
+    assert sum(row["status"] == "ready" for row in rows) == 26
+    assert_never_zero_match(rows, videos, subtitles)
+    assert_invariants(rows, videos, subtitles)
+
+    # 동영상마다 자막 2개(.smi, .ko.srt)가 정확한 회차로 연결
+    per_video = {}
+    for row in rows:
+        per_video.setdefault(row["video_name"], []).append(row["subtitle_name"])
+    assert len(per_video) == 13
+    assert all(len(names) == 2 for names in per_video.values())
+
+    for row in rows:
+        video_ep = int(re.search(r"- (\d{2}) \[", row["video_name"]).group(1))
+        subtitle_ep = int(re.search(r"- (\d{2})Erai", row["subtitle_name"]).group(1))
+        assert video_ep == subtitle_ep
+        assert row["proposed_name"] in (
+            row["video_name"].replace(".mkv", ".smi"),
+            row["video_name"].replace(".mkv", ".ko.srt"),
+        )
+
+
+def test_conflicting_proposed_names_are_not_auto_renamed():
+    """언어 코드 없이 같은 확장자로 겹치면 한쪽만 조용히 실패하지 않도록 충돌 표시."""
+    videos = ["Show - 01.mkv"]
+    subtitles = ["Show - 01.srt", "Show - 01 (2).srt"]
+
+    rows = build_match_pairs("C:/media", videos, subtitles)
+
+    assert_invariants(rows, videos, subtitles)
+    assert {row["status"] for row in rows} == {"synced", "conflict"}
+    conflict_rows = [row for row in rows if row["status"] == "conflict"]
+    assert len(conflict_rows) == 1
+    assert conflict_rows[0]["proposed_path"] == ""
+    assert all(row["status"] != "ready" for row in rows)
 
 
 def test_subtitles_only_folder(tmp_path):

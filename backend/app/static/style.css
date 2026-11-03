@@ -745,6 +745,11 @@ body {
     color: #fca5a5;
 }
 
+.status-badge.status-conflict {
+    background: rgba(245, 158, 11, 0.18);
+    color: #fcd34d;
+}
+
 /* 매칭 근거 표시 (파일명 / 회차 / 순서) */
 .match-method {
     display: block;
