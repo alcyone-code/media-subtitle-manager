@@ -431,6 +431,17 @@ function renderGroupRows(groupIdx) {
             statusBadge = `<span class="status-badge status-unmatched">미매칭</span>`;
         }
         
+        // 매칭 근거 표시 (동영상/자막이 실제로 연결된 경우에만)
+        const matchMethodLabels = {
+            basename: '파일명 일치',
+            episode: '회차 일치',
+            order: '순서 기준',
+            manual: '수동 조정'
+        };
+        if (item.video_path && item.subtitle_path && matchMethodLabels[item.match_method]) {
+            statusBadge += `<span class="match-method">${matchMethodLabels[item.match_method]}</span>`;
+        }
+        
         // 자막 셀 컨텐츠 구성
         let subtitleCell = '';
         if (item.subtitle_path) {
@@ -585,10 +596,13 @@ function updateItemMatchStatus(item) {
         } else {
             item.status = 'ready';
         }
+        // 수동 조정된 행은 자동 매칭 근거가 더 이상 유효하지 않다
+        item.match_method = 'manual';
     } else {
         item.proposed_name = '';
         item.proposed_path = '';
         item.status = 'unmatched';
+        item.match_method = 'unmatched';
     }
 }
 

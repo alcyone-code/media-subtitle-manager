@@ -43,48 +43,96 @@ def natural_sort_key(s: str) -> List[Any]:
     return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
 
 
+def safe_natural_sort_key(s: str) -> List[Any]:
+    """
+    숫자로 시작하는 파일명과 문자로 시작하는 파일명이 섞여도 TypeError 없이 비교 가능한 정렬 키
+    """
+    return [
+        (0, part) if isinstance(part, int) else (1, part)
+        for part in natural_sort_key(s)
+    ]
+
+
+# 자막 파일명에 붙는 언어 코드 (예: "Show - 01.ko.srt", "Show - 01.KOR.srt")
+LANGUAGE_SUFFIXES = {
+    'ko', 'kor', 'kr',
+    'en', 'eng',
+    'ja', 'jpn', 'jp',
+    'zh', 'zho', 'chi', 'chs', 'cht', 'sc', 'tc',
+}
+
+_LANGUAGE_SUFFIX_PATTERN = re.compile(r'\.([A-Za-z]{2,3})$')
+
+# 회차 표기가 명확한 패턴 (우선순위 순)
+EPISODE_PATTERNS = (
+    re.compile(r'S(\d{1,2})\s*E(\d{1,4})(?!\d)', re.IGNORECASE),
+    re.compile(r'\bE[P]?\s*(\d{1,4})(?!\d)', re.IGNORECASE),
+    re.compile(r'#\s*(\d{1,4})(?!\d)'),
+    re.compile(r'제\s*(\d{1,4})\s*화'),
+    re.compile(r'(\d{1,4})\s*화'),
+)
+
+# 위 패턴에 걸리지 않는 파일명을 위한 마지막 수단.
+# 대괄호로 감싼 해시/태그([5BBF013C])를 회차로 오인하지 않도록 제거한 뒤 검사한다.
+_BRACKETED_PATTERN = re.compile(r'\[[^\]]*\]')
+_NUMERIC_EPISODE_PATTERN = re.compile(r'(?<!\d)(?:^|[ _.\-\[\(])(\d{1,3})(?!\d)')
+
+
 def extract_episode_number(filename: str) -> int | None:
     """
-    파일명에서 일반적인 회차 번호를 추출한다.
+    파일명에서 회차 번호를 추출한다. 확실한 표기가 없으면 None을 반환한다.
+
+    주의: 이 함수의 결과를 단독으로 신뢰하지 않는다.
+    매칭 단계에서는 동영상/자막 양쪽에서 유일하게 추출된 경우에만 사용한다.
     """
     name = os.path.splitext(os.path.basename(filename))[0]
-    patterns = [
-        r'(?i)S\d{1,2}E0*(\d{1,3})(?!\d)',
-        r'(?i)\bEP\s*0*(\d{1,3})(?!\d)',
-        r'#\s*0*(\d{1,3})(?!\d)',
-        r'제\s*0*(\d{1,3})\s*화',
-        r'0*(\d{1,3})\s*화',
-        r'(?<!\d)[-_ .]0*(\d{1,3})(?=[-_ .\]\)])',
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, name)
+
+    for pattern in EPISODE_PATTERNS:
+        match = pattern.search(name)
         if match:
-            return int(match.group(1))
+            return int(match.group(match.lastindex or 1))
+
+    masked = _BRACKETED_PATTERN.sub(' ', name)
+    match = _NUMERIC_EPISODE_PATTERN.search(masked)
+    if match:
+        return int(match.group(1))
+
     return None
 
 
-def build_episode_maps(paths: List[str]) -> Tuple[Dict[int, str], List[str]]:
+def build_unique_episode_map(paths: List[str]) -> Dict[int, str]:
     """
-    회차 번호를 유일하게 추출할 수 있는 파일과 기존 정렬 fallback 대상 파일을 분리한다.
+    회차 번호를 유일하게 특정할 수 있는 파일만 {회차: 경로}로 반환한다.
+
+    회차를 추출하지 못했거나, 같은 회차로 추출된 파일이 여러 개(예: 다국어 자막)면
+    해당 파일은 맵에서 제외되어 다음 매칭 단계(파일명/순서)로 넘어간다.
     """
     grouped: Dict[int, List[str]] = {}
-    fallback = []
     for file_path in paths:
         episode = extract_episode_number(file_path)
         if episode is None:
-            fallback.append(file_path)
-        else:
-            grouped.setdefault(episode, []).append(file_path)
+            continue
+        grouped.setdefault(episode, []).append(file_path)
 
-    unique: Dict[int, str] = {}
-    for episode, episode_paths in grouped.items():
-        episode_paths.sort(key=lambda x: natural_sort_key(os.path.basename(x)))
-        if len(episode_paths) == 1:
-            unique[episode] = episode_paths[0]
-        else:
-            fallback.extend(episode_paths)
-    fallback.sort(key=lambda x: natural_sort_key(os.path.basename(x)))
-    return unique, fallback
+    return {
+        episode: episode_paths[0]
+        for episode, episode_paths in grouped.items()
+        if len(episode_paths) == 1
+    }
+
+
+def get_stem_key(path: str) -> str:
+    """
+    확장자와 언어 코드를 제거한 비교용 파일명 키
+    (예: "Show - 01.ko.srt" -> "show - 01")
+    """
+    stem = os.path.splitext(os.path.basename(path))[0]
+    for _ in range(2):  # "Show.01.ko" 처럼 언어 코드가 겹치는 경우 대비
+        match = _LANGUAGE_SUFFIX_PATTERN.search(stem)
+        if not match or match.group(1).lower() not in LANGUAGE_SUFFIXES:
+            break
+        stem = stem[:match.start()]
+    return stem.strip().lower()
 
 # ==========================================
 # SMI to SRT 파싱 및 변환 로직 (pysmi2srt 이식)
@@ -235,6 +283,12 @@ def convert_smi_file(smi_path: str, remove_original: bool = False, output_format
 # 자막 매칭 로직 (E.Z-Subtitles 기능 통합)
 # ==========================================
 
+# 매칭 근거 (UI 표시 및 디버깅용)
+MATCH_METHOD_BASENAME = "basename"   # 확장자/언어 코드만 다른 동일 파일명
+MATCH_METHOD_EPISODE = "episode"     # 양쪽 모두 유일하게 추출된 회차 번호
+MATCH_METHOD_ORDER = "order"         # 남은 파일끼리 자연어 정렬 순서
+
+
 def get_files_in_directory(dir_path: str) -> Tuple[List[str], List[str]]:
     """
     주어진 디렉토리 내의 동영상 파일과 자막 파일 목록을 반환 (자연어 정렬 적용)
@@ -258,6 +312,142 @@ def get_files_in_directory(dir_path: str) -> Tuple[List[str], List[str]]:
     
     return videos, subtitles
 
+def _row_sort_key(row: Dict[str, Any]) -> List[Any]:
+    """
+    동영상이 있는 행을 파일명 순으로 먼저, 동영상이 없는(자막만 있는) 행을 뒤로 정렬
+    """
+    if row["video_path"]:
+        return [(0, '')] + safe_natural_sort_key(os.path.basename(row["video_path"]))
+    return [(1, '')] + safe_natural_sort_key(os.path.basename(row["subtitle_path"] or ""))
+
+
+def _make_match_pair(
+    directory: str,
+    video_path: str | None,
+    subtitle_path: str | None,
+    method: str,
+) -> Dict[str, Any]:
+    """
+    매칭 결과 한 행(동영상/자막 쌍)을 생성한다.
+    """
+    proposed_name = ""
+    proposed_path = ""
+    if video_path and subtitle_path:
+        video_base = os.path.splitext(os.path.basename(video_path))[0]
+        sub_ext = os.path.splitext(os.path.basename(subtitle_path))[1]
+        proposed_name = f"{video_base}{sub_ext}"
+        proposed_path = os.path.join(directory, proposed_name)
+        status = "synced" if os.path.basename(subtitle_path) == proposed_name else "ready"
+        match_method = method
+    else:
+        status = "unmatched"
+        match_method = "unmatched"
+
+    return {
+        "id": 0,
+        "video_path": video_path,
+        "video_name": os.path.basename(video_path) if video_path else "",
+        "subtitle_path": subtitle_path,
+        "subtitle_name": os.path.basename(subtitle_path) if subtitle_path else "",
+        "proposed_name": proposed_name,
+        "proposed_path": proposed_path,
+        "status": status,
+        "match_method": match_method,
+    }
+
+
+def build_match_pairs(directory: str, videos: List[str], subtitles: List[str]) -> List[Dict[str, Any]]:
+    """
+    한 폴더의 동영상/자막을 다음 3단계로 매칭한다.
+
+      1) 확장자만 다른 동일 파일명            (가장 확실)
+      2) 양쪽 모두 유일하게 추출된 회차 번호   (신뢰도 높음)
+      3) 남은 파일끼리 자연어 정렬 순서 1:1    (main 브랜치의 기존 동작)
+
+    각 단계는 "아직 매칭되지 않고 남은 파일"만 대상으로 삼는다.
+    따라서 어느 한 단계에서 한쪽만 인식되더라도 파일이 고립되지 않고
+    다음 단계에서 반드시 매칭 기회를 얻는다.
+    """
+    remaining_videos = sorted(videos, key=lambda x: natural_sort_key(os.path.basename(x)))
+    remaining_subtitles = sorted(subtitles, key=lambda x: natural_sort_key(os.path.basename(x)))
+    pairs: List[Tuple[str | None, str | None, str]] = []
+
+    # 1단계: 언어 코드만 다른 동일 파일명 (예: "Show - 01.mkv" <-> "Show - 01.ko.srt")
+    videos_by_key: Dict[str, List[str]] = {}
+    for video_path in remaining_videos:
+        videos_by_key.setdefault(get_stem_key(video_path), []).append(video_path)
+
+    for subtitle_path in list(remaining_subtitles):
+        candidates = videos_by_key.get(get_stem_key(subtitle_path))
+        if not candidates:
+            continue
+        video_path = candidates.pop(0)
+        remaining_videos.remove(video_path)
+        remaining_subtitles.remove(subtitle_path)
+        pairs.append((video_path, subtitle_path, MATCH_METHOD_BASENAME))
+
+    # 2단계: 회차 번호 — 양쪽 모두 "유일하게" 추출된 회차만 사용
+    video_by_episode = build_unique_episode_map(remaining_videos)
+    subtitle_by_episode = build_unique_episode_map(remaining_subtitles)
+    for episode in sorted(set(video_by_episode) & set(subtitle_by_episode)):
+        video_path = video_by_episode[episode]
+        subtitle_path = subtitle_by_episode[episode]
+        remaining_videos.remove(video_path)
+        remaining_subtitles.remove(subtitle_path)
+        pairs.append((video_path, subtitle_path, MATCH_METHOD_EPISODE))
+
+    # 3단계: 남은 파일은 자연어 정렬 순서대로 1:1 대응 (main 브랜치 동작)
+    max_len = max(len(remaining_videos), len(remaining_subtitles))
+    for i in range(max_len):
+        video_path = remaining_videos[i] if i < len(remaining_videos) else None
+        subtitle_path = remaining_subtitles[i] if i < len(remaining_subtitles) else None
+        pairs.append((video_path, subtitle_path, MATCH_METHOD_ORDER))
+
+    # 안전장치: 양쪽에 파일이 있는데 매칭된 쌍이 하나도 없다면 순서 기반으로 재시도한다.
+    # (향후 매칭 로직이 변경되어도 "조용히 0건"으로 끝나는 상황을 만들지 않기 위함)
+    if videos and subtitles and not any(video and subtitle for video, subtitle, _ in pairs):
+        logger.log(
+            f"경고: 매칭된 쌍이 없어 순서 기반 매칭으로 대체합니다. ({directory})",
+            "WARN",
+        )
+        ordered_videos = sorted(videos, key=lambda x: natural_sort_key(os.path.basename(x)))
+        ordered_subtitles = sorted(subtitles, key=lambda x: natural_sort_key(os.path.basename(x)))
+        pairs = [
+            (
+                ordered_videos[i] if i < len(ordered_videos) else None,
+                ordered_subtitles[i] if i < len(ordered_subtitles) else None,
+                MATCH_METHOD_ORDER,
+            )
+            for i in range(max(len(ordered_videos), len(ordered_subtitles)))
+        ]
+
+    rows = [
+        _make_match_pair(directory, video_path, subtitle_path, method)
+        for video_path, subtitle_path, method in pairs
+    ]
+    rows.sort(key=_row_sort_key)
+    for index, row in enumerate(rows):
+        row["id"] = index
+
+    # 순서로 이어붙였는데 양쪽 회차가 서로 다르면 잘못된 이름 변경일 수 있으므로 경고한다.
+    conflicting = 0
+    for row in rows:
+        if row["match_method"] != MATCH_METHOD_ORDER:
+            continue
+        video_episode = extract_episode_number(row["video_path"]) if row["video_path"] else None
+        subtitle_episode = extract_episode_number(row["subtitle_path"]) if row["subtitle_path"] else None
+        if video_episode is not None and subtitle_episode is not None and video_episode != subtitle_episode:
+            conflicting += 1
+    if conflicting:
+        logger.log(
+            f"경고: 회차가 서로 다른 파일을 순서로 매칭했습니다 {conflicting}건. "
+            f"미리보기에서 반드시 확인하세요. ({directory})",
+            "WARN",
+        )
+
+    return rows
+
+
 def scan_media_folder(root_dir: str) -> List[Dict[str, Any]]:
     """
     지정 폴더의 하위 경로를 재귀적으로 탐색하여 폴더 단위별 매칭 목록을 수집
@@ -277,62 +467,22 @@ def scan_media_folder(root_dir: str) -> List[Dict[str, Any]]:
         
         # 동영상이나 자막이 하나라도 있으면 그룹 생성
         if videos or subtitles:
-            match_pairs = []
-            video_by_episode, fallback_videos = build_episode_maps(videos)
-            subtitle_by_episode, fallback_subtitles = build_episode_maps(subtitles)
-            
-            for episode in sorted(set(video_by_episode) | set(subtitle_by_episode)):
-                video_path = video_by_episode.get(episode)
-                subtitle_path = subtitle_by_episode.get(episode)
-                
-                proposed_name = ""
-                proposed_path = ""
-                if video_path and subtitle_path:
-                    video_base = os.path.splitext(os.path.basename(video_path))[0]
-                    sub_ext = os.path.splitext(os.path.basename(subtitle_path))[1]
-                    proposed_name = f"{video_base}{sub_ext}"
-                    proposed_path = os.path.join(p, proposed_name)
-                
-                match_pairs.append({
-                    "id": len(match_pairs),
-                    "video_path": video_path,
-                    "video_name": os.path.basename(video_path) if video_path else "",
-                    "subtitle_path": subtitle_path,
-                    "subtitle_name": os.path.basename(subtitle_path) if subtitle_path else "",
-                    "proposed_name": proposed_name,
-                    "proposed_path": proposed_path,
-                    "status": "ready" if (video_path and subtitle_path and os.path.basename(subtitle_path) != proposed_name) else "synced" if (video_path and subtitle_path) else "unmatched"
-                })
+            match_pairs = build_match_pairs(p, videos, subtitles)
 
-            max_len = max(len(fallback_videos), len(fallback_subtitles))
-            for i in range(max_len):
-                video_path = fallback_videos[i] if i < len(fallback_videos) else None
-                subtitle_path = fallback_subtitles[i] if i < len(fallback_subtitles) else None
-                
-                proposed_name = ""
-                proposed_path = ""
-                if video_path and subtitle_path:
-                    video_base = os.path.splitext(os.path.basename(video_path))[0]
-                    sub_ext = os.path.splitext(os.path.basename(subtitle_path))[1]
-                    proposed_name = f"{video_base}{sub_ext}"
-                    proposed_path = os.path.join(p, proposed_name)
-                
-                match_pairs.append({
-                    "id": len(match_pairs),
-                    "video_path": video_path,
-                    "video_name": os.path.basename(video_path) if video_path else "",
-                    "subtitle_path": subtitle_path,
-                    "subtitle_name": os.path.basename(subtitle_path) if subtitle_path else "",
-                    "proposed_name": proposed_name,
-                    "proposed_path": proposed_path,
-                    "status": "ready" if (video_path and subtitle_path and os.path.basename(subtitle_path) != proposed_name) else "synced" if (video_path and subtitle_path) else "unmatched"
-                })
-            
             # 상대 경로 표시를 위한 가공
             relative_dir = os.path.relpath(p, root_dir)
             if relative_dir == ".":
                 relative_dir = "/"
-                
+
+            # 미매칭이 남아 있으면 원인 파악이 가능하도록 요약 로그를 남긴다.
+            unmatched_count = sum(1 for row in match_pairs if row["status"] == "unmatched")
+            if unmatched_count:
+                logger.log(
+                    f"[{relative_dir}] 미매칭 {unmatched_count}건 "
+                    f"(동영상 {len(videos)}개 / 자막 {len(subtitles)}개)",
+                    "WARN",
+                )
+
             folder_match_groups.append({
                 "dir_path": p,
                 "relative_path": relative_dir,

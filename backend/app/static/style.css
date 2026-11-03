@@ -745,6 +745,15 @@ body {
     color: #fca5a5;
 }
 
+/* 매칭 근거 표시 (파일명 / 회차 / 순서) */
+.match-method {
+    display: block;
+    margin-top: 4px;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    font-weight: 400;
+}
+
 /* Terminal Console (Logs) */
 .terminal-card {
     display: flex;
