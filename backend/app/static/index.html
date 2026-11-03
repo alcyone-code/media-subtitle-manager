@@ -83,7 +83,7 @@
                     <div class="tab-content">
                         <!-- Match Tab Content -->
                         <div id="content-match" class="tab-pane active">
-                            <p class="tab-desc">선택된 폴더와 그 하위 폴더들을 탐색하여 동영상 파일명과 동일하게 자막 파일명을 변경합니다. (폴더별 독립 매칭 & 에피소드 정렬 예외 처리 적용)</p>
+                            <p class="tab-desc">선택된 폴더와 그 하위 폴더들을 탐색하여 동영상 파일명과 동일하게 자막 파일명을 변경합니다. 한 회차에 자막이 여러 개(.smi, .srt, .ko.srt 등)여도 모두 함께 매칭되며, 결과는 동영상 단위로 묶여 표시됩니다.</p>
                             <div class="btn-group">
                                 <button id="btn-match-preview" class="btn btn-primary" disabled>
                                     <i class="fa-solid fa-magnifying-glass"></i> 매칭 미리보기 분석
@@ -151,7 +151,7 @@
                 <div id="preview-section" class="preview-card glass hidden">
                     <div class="preview-header">
                         <h3><i class="fa-solid fa-eye"></i> 매칭 결과 미리보기</h3>
-                        <span class="badge" id="txt-preview-count">0개 매칭됨</span>
+                        <span class="badge" id="txt-preview-count">자막 0개 변경 예정</span>
                     </div>
                     
                     <div class="preview-container">
@@ -160,6 +160,10 @@
                     </div>
                     
                     <div class="preview-footer">
+                        <span class="preview-footer-hint">
+                            <i class="fa-solid fa-circle-info"></i>
+                            체크한 자막만 변경됩니다. ↑/↓ 버튼으로 자막을 이전/다음 회차 영상에 연결할 수 있습니다.
+                        </span>
                         <button id="btn-execute-sync" class="btn btn-success">
                             <i class="fa-solid fa-file-signature"></i> 자막 파일명 일괄 변경 적용
                         </button>
