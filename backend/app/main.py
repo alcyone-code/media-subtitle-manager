@@ -2,7 +2,7 @@ import os
 import json
 import asyncio
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Optional
@@ -281,4 +281,47 @@ def get_version():
 
 static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 os.makedirs(static_dir, exist_ok=True)
+
+
+@app.middleware("http")
+async def add_static_cache_headers(request: Request, call_next):
+    """
+    업데이트 후 브라우저가 예전 app.js/style.css를 계속 쓰지 않도록 캐시 정책을 명시한다.
+
+    - HTML: no-store (항상 새로 받아 현재 버전의 자산 URL을 얻는다)
+    - ?v=버전 이 붙은 JS/CSS: 내용이 바뀌면 URL도 바뀌므로 길게 캐시해도 안전하다
+    - 그 외 정적 파일/API: no-cache (매번 재검증, 변경 없으면 304)
+    """
+    response = await call_next(request)
+    path = request.url.path
+
+    if path.startswith("/api/"):
+        return response
+
+    content_type = response.headers.get("content-type", "")
+    is_versioned_asset = request.url.query.startswith("v=") and path.endswith((".js", ".css"))
+
+    if "text/html" in content_type:
+        response.headers["Cache-Control"] = "no-store"
+    elif is_versioned_asset:
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    else:
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
+@app.get("/", include_in_schema=False)
+def serve_index():
+    """index.html의 정적 자산 URL에 앱 버전을 붙여 캐시를 자동으로 무효화한다."""
+    index_path = os.path.join(static_dir, "index.html")
+    with open(index_path, "r", encoding="utf-8") as f:
+        html = f.read()
+
+    version = APP_VERSION or "dev"
+    html = html.replace('href="style.css"', f'href="style.css?v={version}"')
+    html = html.replace('src="app.js"', f'src="app.js?v={version}"')
+
+    return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+
+
 app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
