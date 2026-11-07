@@ -4,7 +4,8 @@
 핵심 원칙
 ---------
 1) 동영상/자막 양쪽에서 회차를 "유일하게" 추출했을 때만 회차 기반 매칭을 사용한다.
-2) 어떤 경우에도 파일이 고립되어 "0건 매칭"으로 끝나지 않는다. (마지막 단계는 순서 기반)
+2) 순서 기반 매칭은 최후의 수단이며, 양쪽 회차가 명확한데 서로 다르면 연결하지 않는다.
+   (예: E01/E02 동영상만 있는데 7.5화 특별편 자막만 있는 폴더)
 3) 한 파일은 결과에서 정확히 한 번만 등장한다.
 """
 
@@ -285,6 +286,51 @@ def test_conflicting_proposed_names_are_not_auto_renamed():
     assert len(conflict_rows) == 1
     assert conflict_rows[0]["proposed_path"] == ""
     assert all(row["status"] != "ready" for row in rows)
+
+
+def test_order_matching_does_not_pair_different_episodes(tmp_path):
+    """S00E01/E02 동영상만 있는 폴더의 7.5화 특별편 자막은 순서로 붙이지 않는다."""
+    videos = [
+        "[Sav1or] So Ra No Wo To (Sound of the Sky) - S00E01 - Drinking Party Fortress Battle [1080p].mkv",
+        "[Sav1or] So Ra No Wo To (Sound of the Sky) - S00E02 - The Sound of the Sky [1080p].mkv",
+    ]
+    subtitles = [
+        "OVA Sora no Woto 07.5 (BDRip 1080p AV1 cq38 AAC).ko.srt",
+        "OVA Sora no Woto 07.5 (BDRip 1080p AV1 cq38 AAC).smi",
+    ]
+    create_files(tmp_path, videos + subtitles)
+
+    rows = flatten(scan_media_folder(str(tmp_path)))
+
+    assert_invariants(rows, videos, subtitles)
+    # 잘못된 이름으로 바뀌지 않도록 동영상/자막을 하나도 연결하지 않는다
+    assert not [row for row in rows if row["video_path"] and row["subtitle_path"]]
+    assert not [row for row in rows if row["proposed_name"]]
+
+    unmatched_videos = [row["video_name"] for row in rows if row["video_path"]]
+    orphan_subtitles = [row["subtitle_name"] for row in rows if row["subtitle_path"]]
+    assert sorted(unmatched_videos) == sorted(videos)
+    assert sorted(orphan_subtitles) == sorted(subtitles)
+    assert {row["status"] for row in rows} == {"unmatched"}
+
+
+def test_conflicting_episode_is_skipped_while_others_still_match():
+    """일부만 회차가 어긋날 때는 그 항목만 미매칭으로 남기고 나머지는 매칭한다."""
+    videos = ["Show - 01.mkv", "Show - 02.mkv", "Show - 03.mkv"]
+    subtitles = ["Show - 01.smi", "Show - 02.smi", "Show - 07.5.smi"]
+
+    rows = build_match_pairs("C:/media", videos, subtitles)
+
+    assert_invariants(rows, videos, subtitles)
+    matched = [row for row in rows if row["video_path"] and row["subtitle_path"]]
+    assert len(matched) == 2
+    assert {row["subtitle_name"] for row in matched} == {"Show - 01.smi", "Show - 02.smi"}
+
+    # 03화 동영상과 7.5화 자막은 각각 미매칭으로 남는다
+    leftover_videos = [row["video_name"] for row in rows if row["video_path"] and not row["subtitle_path"]]
+    orphan_subtitles = [row["subtitle_name"] for row in rows if row["subtitle_path"] and not row["video_path"]]
+    assert leftover_videos == ["Show - 03.mkv"]
+    assert orphan_subtitles == ["Show - 07.5.smi"]
 
 
 def test_subtitles_only_folder(tmp_path):

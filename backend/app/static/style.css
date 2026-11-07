@@ -865,6 +865,25 @@ body {
     flex: 0 0 auto;
 }
 
+.orphan-attach {
+    flex: 0 0 auto;
+    max-width: 280px;
+    padding: 3px 6px;
+    border-radius: 5px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-secondary);
+    font-family: var(--font-sans);
+    font-size: 0.72rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.orphan-attach:hover {
+    border-color: rgba(99, 102, 241, 0.45);
+    color: #c7d2fe;
+}
+
 .btn-move {
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid rgba(255, 255, 255, 0.08);
@@ -1140,16 +1159,22 @@ body {
 
     .subtitle-row {
         flex-wrap: wrap;
+        gap: 6px 10px;
     }
 
+    /* 체크박스(15px) + 간격(10px)을 제외한 첫 줄 전체를 파일명이 사용한다 */
     .sub-names {
-        flex-basis: calc(100% - 30px);
-        order: 1;
+        flex-basis: calc(100% - 25px);
     }
 
     .sub-actions {
-        order: 2;
         margin-left: auto;
+    }
+
+    .orphan-attach {
+        flex: 1 1 0;
+        min-width: 0;
+        max-width: 100%;
     }
 
     .preview-footer {

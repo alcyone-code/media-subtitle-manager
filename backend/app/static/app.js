@@ -514,7 +514,7 @@ function renderFolderGroup(group, groupIdx) {
     const videoCards = group.videos
         .map((video, videoIdx) => renderVideoCard(groupIdx, video, videoIdx, group.videos.length))
         .join('');
-    const orphanCard = group.orphans.length ? renderOrphanCard(group.orphans) : '';
+    const orphanCard = group.orphans.length ? renderOrphanCard(group.orphans, groupIdx, group.videos) : '';
 
     const groupEl = document.createElement('div');
     groupEl.className = 'preview-folder-group';
@@ -594,13 +594,24 @@ function renderSubtitleRow(groupIdx, row, videoIdx, videoCount) {
     `;
 }
 
-function renderOrphanCard(orphans) {
+function renderOrphanCard(orphans, groupIdx, videos) {
+    const videoOptions = videos
+        .map((video, index) =>
+            `<option value="${index}">#${index + 1} ${escapeHtml(video.video_name)}</option>`
+        )
+        .join('');
+
     const rows = orphans
         .map((row) => `
             <div class="subtitle-row">
                 <span class="check-placeholder"></span>
                 <div class="sub-names"><span class="sub-original">${escapeHtml(row.subtitle_name)}</span></div>
                 <span class="status-badge status-unmatched">동영상 없음</span>
+                <select class="orphan-attach" data-action="attach" data-group="${groupIdx}"
+                    data-sub="${escapeHtml(row.subtitle_path)}" title="이 자막을 연결할 동영상 선택">
+                    <option value="">동영상에 연결…</option>
+                    ${videoOptions}
+                </select>
             </div>
         `)
         .join('');
@@ -631,6 +642,19 @@ function initPreviewEvents() {
 
     elements.previewList.addEventListener('change', (event) => {
         const input = event.target;
+
+        // 동영상이 없는 자막을 특정 동영상에 수동 연결
+        if (input.matches('select[data-action="attach"]')) {
+            if (input.value !== '') {
+                attachOrphanToVideo(
+                    Number(input.dataset.group),
+                    input.dataset.sub,
+                    Number(input.value)
+                );
+            }
+            return;
+        }
+
         if (input.matches('input[data-action="toggle"]')) {
             if (input.checked) {
                 state.excludedSubtitles.delete(input.dataset.sub);
@@ -653,6 +677,34 @@ function initPreviewEvents() {
             renderPreview();
         }
     });
+}
+
+function attachOrphanToVideo(groupIdx, subtitlePath, videoIndex) {
+    const group = state.previewModel[groupIdx];
+    if (!group) return;
+
+    const target = group.videos[videoIndex];
+    if (!target) return;
+
+    const orphanIndex = group.orphans.findIndex((row) => row.subtitle_path === subtitlePath);
+    if (orphanIndex === -1) return;
+
+    const [row] = group.orphans.splice(orphanIndex, 1);
+    row.video_path = target.video_path;
+    row.video_name = target.video_name;
+    target.subtitles.push(row);
+    target.subtitles.sort((a, b) => naturalCompare(a.subtitle_name, b.subtitle_name));
+
+    refreshMatchStatuses(state.previewModel, subtitlePath);
+    renderPreview();
+    appendLog(`[SYSTEM] 수동 연결: ${row.subtitle_name} → ${target.video_name}`);
+
+    const attachedRow = target.subtitles.find((item) => item.subtitle_path === subtitlePath);
+    if (attachedRow && attachedRow.status === 'conflict') {
+        appendLog(
+            `[WARN] ${attachedRow.subtitle_name}: 대상 동영상에 같은 이름으로 변경될 자막이 있어 변경 대상에서 제외했습니다.`
+        );
+    }
 }
 
 function moveSubtitleToVideo(groupIdx, subtitlePath, direction) {

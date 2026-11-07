@@ -392,6 +392,10 @@ def build_match_pairs(directory: str, videos: List[str], subtitles: List[str]) -
     동영상 1개에 자막 여러 개(.smi + .srt + .ko.srt 등)가 붙을 수 있다.
     각 단계는 "아직 매칭되지 않고 남은 자막"만 대상으로 삼으므로,
     어느 한 단계에서 한쪽만 인식되더라도 파일이 고립되지 않는다.
+
+    3단계에서도 동영상/자막 양쪽 회차가 모두 명확하고 서로 다르면 연결하지 않는다.
+    (예: S00E01/E02 동영상만 있는 폴더에 7.5화 특별편 자막만 있는 경우)
+    순서만 믿고 붙이면 실제로는 다른 회차인 자막을 잘못된 이름으로 바꾸게 되기 때문이다.
     """
     remaining_videos = sorted(videos, key=lambda x: natural_sort_key(os.path.basename(x)))
     remaining_subtitles = sorted(subtitles, key=lambda x: natural_sort_key(os.path.basename(x)))
@@ -436,17 +440,48 @@ def build_match_pairs(directory: str, videos: List[str], subtitles: List[str]) -
             remaining_subtitles.remove(subtitle_path)
         matched_videos.add(video_path)
 
-    # 3단계: 아직 자막이 없는 동영상과 남은 자막을 자연어 정렬 순서대로 1:1 대응
+    # 3단계: 아직 자막이 없는 동영상과 남은 자막을 자연어 정렬 순서대로 1:1 대응.
+    # 단, 양쪽 모두 회차가 명확한데 서로 다르면(예: E01/E02 동영상 + 7.5화 특별편 자막)
+    # 순서만으로 붙이는 것은 잘못된 이름 변경이므로 연결하지 않고 미매칭으로 남긴다.
     leftover_videos = [video_path for video_path in remaining_videos if video_path not in matched_videos]
+    order_rejected = 0
     max_len = max(len(leftover_videos), len(remaining_subtitles))
     for i in range(max_len):
         video_path = leftover_videos[i] if i < len(leftover_videos) else None
         subtitle_path = remaining_subtitles[i] if i < len(remaining_subtitles) else None
+
+        if video_path and subtitle_path:
+            video_episode = extract_episode_number(video_path)
+            subtitle_episode = extract_episode_number(subtitle_path)
+            if (
+                video_episode is not None
+                and subtitle_episode is not None
+                and video_episode != subtitle_episode
+            ):
+                # 동영상 행과 자막 행을 각각 남겨 미매칭 상태로 표시한다.
+                pairs.append((video_path, None, MATCH_METHOD_ORDER))
+                pairs.append((None, subtitle_path, MATCH_METHOD_ORDER))
+                order_rejected += 1
+                continue
+
         pairs.append((video_path, subtitle_path, MATCH_METHOD_ORDER))
+
+    if order_rejected:
+        logger.log(
+            f"경고: 회차가 서로 다른 파일 {order_rejected}건은 자동으로 연결하지 않았습니다. "
+            f"미리보기의 '동영상이 없는 자막'에서 직접 연결할 수 있습니다. ({directory})",
+            "WARN",
+        )
 
     # 안전장치: 양쪽에 파일이 있는데 매칭된 쌍이 하나도 없다면 순서 기반으로 재시도한다.
     # (향후 매칭 로직이 변경되어도 "조용히 0건"으로 끝나는 상황을 만들지 않기 위함)
-    if videos and subtitles and not any(video and subtitle for video, subtitle, _ in pairs):
+    # 단, 회차 충돌로 의도적으로 제외한 경우에는 재시도하지 않는다.
+    if (
+        videos
+        and subtitles
+        and order_rejected == 0
+        and not any(video and subtitle for video, subtitle, _ in pairs)
+    ):
         logger.log(
             f"경고: 매칭된 쌍이 없어 순서 기반 매칭으로 대체합니다. ({directory})",
             "WARN",
@@ -492,22 +527,6 @@ def build_match_pairs(directory: str, videos: List[str], subtitles: List[str]) -
 
     for index, row in enumerate(rows):
         row["id"] = index
-
-    # 순서로 이어붙였는데 양쪽 회차가 서로 다르면 잘못된 이름 변경일 수 있으므로 경고한다.
-    conflicting = 0
-    for row in rows:
-        if row["match_method"] != MATCH_METHOD_ORDER:
-            continue
-        video_episode = extract_episode_number(row["video_path"]) if row["video_path"] else None
-        subtitle_episode = extract_episode_number(row["subtitle_path"]) if row["subtitle_path"] else None
-        if video_episode is not None and subtitle_episode is not None and video_episode != subtitle_episode:
-            conflicting += 1
-    if conflicting:
-        logger.log(
-            f"경고: 회차가 서로 다른 파일을 순서로 매칭했습니다 {conflicting}건. "
-            f"미리보기에서 반드시 확인하세요. ({directory})",
-            "WARN",
-        )
 
     return rows
 
