@@ -151,7 +151,18 @@
                 <div id="preview-section" class="preview-card glass hidden">
                     <div class="preview-header">
                         <h3><i class="fa-solid fa-eye"></i> 매칭 결과 미리보기</h3>
-                        <span class="badge" id="txt-preview-count">자막 0개 변경 예정</span>
+                        <div class="preview-tools">
+                            <div class="preview-search">
+                                <i class="fa-solid fa-magnifying-glass"></i>
+                                <input type="search" id="txt-preview-search" placeholder="파일명 또는 폴더 검색…"
+                                    autocomplete="off" spellcheck="false">
+                            </div>
+                            <span id="txt-search-info" class="preview-search-info hidden"></span>
+                            <button type="button" id="btn-toggle-collapse" class="btn-tool" title="모든 폴더 접기/펼치기">
+                                <i class="fa-solid fa-chevron-up"></i><span>모두 접기</span>
+                            </button>
+                            <span class="badge" id="txt-preview-count">자막 0개 변경 예정</span>
+                        </div>
                     </div>
                     
                     <div class="preview-container">
@@ -162,7 +173,7 @@
                     <div class="preview-footer">
                         <span class="preview-footer-hint">
                             <i class="fa-solid fa-circle-info"></i>
-                            체크한 자막만 변경됩니다. ↑/↓ 버튼으로 자막을 이전/다음 회차 영상에 연결할 수 있고, 동영상이 없는 자막은 드롭다운으로 직접 연결할 수 있습니다.
+                            체크한 자막만 변경됩니다. ↑/↓ 버튼으로 이전/다음 회차 영상에 연결하고, 상단 검색과 폴더 접기로 목록을 좁힐 수 있습니다. 동영상이 없는 자막은 드롭다운으로 직접 연결할 수 있습니다.
                         </span>
                         <button id="btn-execute-sync" class="btn btn-success">
                             <i class="fa-solid fa-file-signature"></i> 자막 파일명 일괄 변경 적용

@@ -8,6 +8,8 @@ const state = {
     previewGroups: [], // 폴더 단위 매칭 미리보기 원본 데이터
     previewModel: [],  // 동영상 단위로 재구성한 미리보기 데이터
     excludedSubtitles: new Set(), // 이름 변경에서 제외할 자막 경로
+    previewQuery: '',  // 미리보기 검색어
+    collapsedGroups: new Set(), // 접힌 폴더 그룹 (dir_path 기준)
     eventSource: null
 };
 
@@ -35,6 +37,9 @@ const elements = {
     previewSection: document.getElementById('preview-section'),
     txtPreviewCount: document.getElementById('txt-preview-count'),
     previewList: document.getElementById('preview-list'),
+    txtPreviewSearch: document.getElementById('txt-preview-search'),
+    txtSearchInfo: document.getElementById('txt-search-info'),
+    btnToggleCollapse: document.getElementById('btn-toggle-collapse'),
     btnExecuteSync: document.getElementById('btn-execute-sync'),
     
     // Terminal
@@ -247,6 +252,9 @@ function initActionEvents() {
             state.previewGroups = await response.json();
             state.excludedSubtitles = new Set();
             state.previewModel = buildPreviewModel(state.previewGroups);
+            state.previewQuery = '';
+            state.collapsedGroups.clear();
+            elements.txtPreviewSearch.value = '';
             refreshMatchStatuses(state.previewModel, null);
 
             renderPreview();
@@ -323,6 +331,9 @@ function initActionEvents() {
             state.previewGroups = [];
             state.previewModel = [];
             state.excludedSubtitles.clear();
+            state.previewQuery = '';
+            state.collapsedGroups.clear();
+            if (elements.txtPreviewSearch) elements.txtPreviewSearch.value = '';
             
             // 폴더 브라우저 새로고침
             loadDirectory(state.currentPath);
@@ -428,6 +439,35 @@ function naturalCompare(a, b) {
     return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
 }
 
+// 백엔드 get_stem_key와 동일한 규칙: 확장자/언어 코드를 제거한 묶음 키
+const LANGUAGE_SUFFIXES = new Set([
+    'ko', 'kor', 'kr',
+    'en', 'eng',
+    'ja', 'jpn', 'jp',
+    'zh', 'zho', 'chi', 'chs', 'cht', 'sc', 'tc'
+]);
+
+function subtitleBundleKey(name) {
+    let stem = stripExtension(name);
+    for (let i = 0; i < 2; i += 1) {
+        const match = stem.match(/\.([A-Za-z]{2,3})$/);
+        if (!match || !LANGUAGE_SUFFIXES.has(match[1].toLowerCase())) break;
+        stem = stem.substring(0, match.index);
+    }
+    return stem.trim().toLowerCase();
+}
+
+// 확장자/언어 코드만 다른 자막(.smi + .ko.srt)을 한 묶음으로 그룹화
+function groupSubtitleBundles(rows) {
+    const bundles = new Map();
+    rows.forEach((row) => {
+        const key = subtitleBundleKey(row.subtitle_name);
+        if (!bundles.has(key)) bundles.set(key, []);
+        bundles.get(key).push(row);
+    });
+    return Array.from(bundles.values());
+}
+
 // 백엔드의 폴더별 매칭 결과(행 목록)를 "동영상 1개 + 자막 여러 개" 구조로 변환
 function buildPreviewModel(groups) {
     return groups.map((group) => {
@@ -485,8 +525,118 @@ function renderPreview() {
         elements.previewList.appendChild(renderFolderGroup(group, groupIdx));
     });
     updatePreviewSummary();
+    applySearchFilter();
 
     if (container) container.scrollTop = scrollTop;
+}
+
+// 검색은 DOM을 다시 만들지 않고 표시/숨김만 토글한다 (대용량 폴더에서도 즉시 반응)
+function applySearchFilter() {
+    const query = state.previewQuery.trim().toLowerCase();
+    const groupEls = Array.from(elements.previewList.querySelectorAll('.preview-folder-group'));
+    let shownGroups = 0;
+    let shownItems = 0;
+
+    groupEls.forEach((groupEl) => {
+        const groupMatched = Boolean(query) && (groupEl.dataset.name || '').includes(query);
+        let groupVisible = false;
+
+        Array.from(groupEl.querySelectorAll('.video-card')).forEach((card) => {
+            const cardMatched = Boolean(query) && (card.dataset.name || '').includes(query);
+            const rows = Array.from(card.querySelectorAll('.subtitle-row'));
+
+            if (!query) {
+                card.classList.remove('search-hidden');
+                rows.forEach((row) => row.classList.remove('search-hidden'));
+                groupVisible = true;
+                shownItems += 1 + rows.length;
+                return;
+            }
+
+            let visibleRows = 0;
+            rows.forEach((row) => {
+                const rowMatched = groupMatched || cardMatched
+                    || (row.dataset.name || '').includes(query);
+                row.classList.toggle('search-hidden', !rowMatched);
+                if (rowMatched) visibleRows += 1;
+            });
+
+            const cardVisible = groupMatched || cardMatched || visibleRows > 0;
+            card.classList.toggle('search-hidden', !cardVisible);
+            if (cardVisible) {
+                groupVisible = true;
+                shownItems += 1 + visibleRows;
+            }
+        });
+
+        groupEl.classList.toggle('search-hidden', !groupVisible);
+        groupEl.classList.toggle('searching', Boolean(query));
+        if (groupVisible) shownGroups += 1;
+    });
+
+    let emptyEl = elements.previewList.querySelector('.preview-empty');
+    if (query && shownGroups === 0) {
+        if (!emptyEl) {
+            emptyEl = document.createElement('div');
+            emptyEl.className = 'preview-empty';
+            emptyEl.innerHTML = '<i class="fa-solid fa-magnifying-glass"></i><span></span>';
+            elements.previewList.appendChild(emptyEl);
+        }
+        emptyEl.querySelector('span').textContent = `“${state.previewQuery}” 검색 결과가 없습니다.`;
+    } else if (emptyEl) {
+        emptyEl.remove();
+    }
+
+    if (elements.txtSearchInfo) {
+        elements.txtSearchInfo.textContent = query ? `${shownGroups}개 폴더 · ${shownItems}개 항목` : '';
+        elements.txtSearchInfo.classList.toggle('hidden', !query);
+    }
+
+    updateCollapseButton();
+}
+
+function updateCollapseButton() {
+    if (!elements.btnToggleCollapse) return;
+    const groups = state.previewModel;
+    const searching = Boolean(state.previewQuery.trim());
+    const allCollapsed = !searching
+        && groups.length > 0
+        && groups.every((group) => state.collapsedGroups.has(group.dir_path));
+
+    elements.btnToggleCollapse.innerHTML = allCollapsed
+        ? '<i class="fa-solid fa-chevron-down"></i><span>모두 펼치기</span>'
+        : '<i class="fa-solid fa-chevron-up"></i><span>모두 접기</span>';
+    // 검색 중에는 결과가 항상 펼쳐지므로 접기 버튼을 비활성화한다.
+    elements.btnToggleCollapse.disabled = groups.length === 0 || searching;
+    elements.btnToggleCollapse.title = searching
+        ? '검색 중에는 검색 결과가 자동으로 펼쳐집니다'
+        : '모든 폴더 접기/펼치기';
+}
+
+function toggleFolderGroup(dirPath) {
+    // 검색 중에는 결과가 항상 펼쳐지도록 둔다.
+    if (state.previewQuery.trim()) return;
+    if (state.collapsedGroups.has(dirPath)) {
+        state.collapsedGroups.delete(dirPath);
+    } else {
+        state.collapsedGroups.add(dirPath);
+    }
+    renderPreview();
+}
+
+function toggleAllFolderGroups() {
+    const groups = state.previewModel;
+    if (groups.length === 0) return;
+
+    const allCollapsed = groups.every((group) => state.collapsedGroups.has(group.dir_path));
+    groups.forEach((group) => {
+        if (allCollapsed) {
+            state.collapsedGroups.delete(group.dir_path);
+        } else {
+            state.collapsedGroups.add(group.dir_path);
+        }
+    });
+    renderPreview();
 }
 
 function renderFolderGroup(group, groupIdx) {
@@ -516,14 +666,20 @@ function renderFolderGroup(group, groupIdx) {
         .join('');
     const orphanCard = group.orphans.length ? renderOrphanCard(group.orphans, groupIdx, group.videos) : '';
 
+    const collapsed = state.collapsedGroups.has(group.dir_path);
+    const searchText = `${group.relative_path || ''} ${group.dir_path || ''}`.toLowerCase();
+
     const groupEl = document.createElement('div');
-    groupEl.className = 'preview-folder-group';
+    groupEl.className = `preview-folder-group${collapsed ? ' collapsed' : ''}`;
+    groupEl.dataset.name = searchText;
     groupEl.innerHTML = `
         <div class="preview-folder-header">
-            <div class="folder-title" title="${escapeHtml(group.dir_path)}">
+            <button type="button" class="folder-title folder-toggle" data-action="toggle-group"
+                data-dir="${escapeHtml(group.dir_path)}" title="폴더 접기/펼치기">
+                <i class="fa-solid fa-chevron-down folder-chevron"></i>
                 <i class="fa-solid fa-folder-open"></i>
                 <span>${escapeHtml(group.relative_path)}</span>
-            </div>
+            </button>
             <div class="folder-stats">${stats.join('')}</div>
             <label class="select-all-label" title="이 폴더의 변경 대상 전체 선택/해제">
                 <input type="checkbox" data-action="select-all" data-group="${groupIdx}"
@@ -544,7 +700,7 @@ function renderVideoCard(groupIdx, video, videoIdx, videoCount) {
         : `<div class="video-empty"><i class="fa-solid fa-ban"></i> 연결된 자막 없음</div>`;
 
     return `
-        <div class="video-card">
+        <div class="video-card" data-name="${escapeHtml(video.video_name.toLowerCase())}">
             <div class="video-card-header">
                 <i class="fa-solid fa-film"></i>
                 <span class="video-name" title="${escapeHtml(video.video_name)}">${escapeHtml(video.video_name)}</span>
@@ -569,8 +725,11 @@ function renderSubtitleRow(groupIdx, row, videoIdx, videoCount) {
         ? `<input type="checkbox" class="sub-check" data-action="toggle" data-sub="${escapeHtml(row.subtitle_path)}" ${isSelected ? 'checked' : ''}>`
         : `<span class="check-placeholder"></span>`;
 
+    const searchText = `${row.subtitle_name || ''} ${row.proposed_name || ''}`.toLowerCase();
+
     return `
-        <div class="subtitle-row ${canSelect && !isSelected ? 'excluded' : ''}">
+        <div class="subtitle-row ${canSelect && !isSelected ? 'excluded' : ''}"
+            data-name="${escapeHtml(searchText)}">
             ${checkbox}
             <div class="sub-names">
                 <span class="sub-original">${escapeHtml(row.subtitle_name)}</span>
@@ -601,27 +760,53 @@ function renderOrphanCard(orphans, groupIdx, videos) {
         )
         .join('');
 
-    const rows = orphans
-        .map((row) => `
-            <div class="subtitle-row">
-                <span class="check-placeholder"></span>
-                <div class="sub-names"><span class="sub-original">${escapeHtml(row.subtitle_name)}</span></div>
-                <span class="status-badge status-unmatched">동영상 없음</span>
-                <select class="orphan-attach" data-action="attach" data-group="${groupIdx}"
-                    data-sub="${escapeHtml(row.subtitle_path)}" title="이 자막을 연결할 동영상 선택">
-                    <option value="">동영상에 연결…</option>
-                    ${videoOptions}
-                </select>
-            </div>
-        `)
+    const bundles = groupSubtitleBundles(orphans);
+    const rows = bundles
+        .map((bundle) => {
+            const first = bundle[0];
+            const names = bundle
+                .map((row) => `<span class="sub-original">${escapeHtml(row.subtitle_name)}</span>`)
+                .join('');
+            const bundleBadge = bundle.length > 1
+                ? `<span class="bundle-count"><i class="fa-solid fa-layer-group"></i> ${bundle.length}개 함께 연결</span>`
+                : '';
+            const attachLabel = bundle.length > 1
+                ? `동영상에 연결… (${bundle.length}개)`
+                : '동영상에 연결…';
+
+            const searchText = bundle
+                .map((row) => `${row.subtitle_name || ''} ${row.proposed_name || ''}`)
+                .join(' ')
+                .toLowerCase();
+
+            return `
+                <div class="subtitle-row orphan-row" data-name="${escapeHtml(searchText)}">
+                    <span class="check-placeholder"></span>
+                    <div class="sub-names">
+                        <div class="bundle-names">${names}</div>
+                        ${bundleBadge}
+                    </div>
+                    <span class="status-badge status-unmatched">동영상 없음</span>
+                    <select class="orphan-attach" data-action="attach" data-group="${groupIdx}"
+                        data-sub="${escapeHtml(first.subtitle_path)}" title="이 자막을 연결할 동영상 선택">
+                        <option value="">${attachLabel}</option>
+                        ${videoOptions}
+                    </select>
+                </div>
+            `;
+        })
         .join('');
 
+    const countLabel = bundles.length === orphans.length
+        ? `${orphans.length}개`
+        : `${bundles.length}묶음 · ${orphans.length}개`;
+
     return `
-        <div class="video-card">
+        <div class="video-card orphan-card" data-name="">
             <div class="video-card-header">
                 <i class="fa-solid fa-triangle-exclamation"></i>
                 <span class="video-name">동영상이 없는 자막</span>
-                <span class="video-count">${orphans.length}개</span>
+                <span class="video-count">${countLabel}</span>
             </div>
             ${rows}
         </div>
@@ -630,7 +815,45 @@ function renderOrphanCard(orphans, groupIdx, videos) {
 
 // 6. 미리보기 상호작용 (선택 / 수동 이동)
 function initPreviewEvents() {
+    let searchTimer = null;
+
+    const applySearch = () => {
+        if (searchTimer) {
+            clearTimeout(searchTimer);
+            searchTimer = null;
+        }
+        state.previewQuery = elements.txtPreviewSearch.value;
+        applySearchFilter();
+    };
+
+    elements.txtPreviewSearch.addEventListener('input', () => {
+        if (searchTimer) clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => {
+            searchTimer = null;
+            state.previewQuery = elements.txtPreviewSearch.value;
+            applySearchFilter();
+        }, 120);
+    });
+
+    // type="search"의 브라우저 기본 지우기 버튼
+    elements.txtPreviewSearch.addEventListener('search', applySearch);
+
+    elements.txtPreviewSearch.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            elements.txtPreviewSearch.value = '';
+            applySearch();
+        }
+    });
+
+    elements.btnToggleCollapse.addEventListener('click', toggleAllFolderGroups);
+
     elements.previewList.addEventListener('click', (event) => {
+        const toggle = event.target.closest('[data-action="toggle-group"]');
+        if (toggle) {
+            toggleFolderGroup(toggle.dataset.dir);
+            return;
+        }
+
         const button = event.target.closest('button[data-action="move"]');
         if (!button) return;
         moveSubtitleToVideo(
@@ -686,25 +909,40 @@ function attachOrphanToVideo(groupIdx, subtitlePath, videoIndex) {
     const target = group.videos[videoIndex];
     if (!target) return;
 
-    const orphanIndex = group.orphans.findIndex((row) => row.subtitle_path === subtitlePath);
-    if (orphanIndex === -1) return;
+    const source = group.orphans.find((row) => row.subtitle_path === subtitlePath);
+    if (!source) return;
 
-    const [row] = group.orphans.splice(orphanIndex, 1);
-    row.video_path = target.video_path;
-    row.video_name = target.video_name;
-    target.subtitles.push(row);
+    // 같은 묶음(확장자/언어 코드만 다른 자막)은 한 번에 함께 연결한다.
+    const bundleKey = subtitleBundleKey(source.subtitle_name);
+    const bundle = group.orphans.filter(
+        (row) => subtitleBundleKey(row.subtitle_name) === bundleKey
+    );
+    if (bundle.length === 0) return;
+
+    const bundlePaths = new Set(bundle.map((row) => row.subtitle_path));
+    group.orphans = group.orphans.filter((row) => !bundlePaths.has(row.subtitle_path));
+
+    bundle.forEach((row) => {
+        row.video_path = target.video_path;
+        row.video_name = target.video_name;
+        target.subtitles.push(row);
+    });
     target.subtitles.sort((a, b) => naturalCompare(a.subtitle_name, b.subtitle_name));
 
-    refreshMatchStatuses(state.previewModel, subtitlePath);
+    bundle.forEach((row) => refreshMatchStatuses(state.previewModel, row.subtitle_path));
     renderPreview();
-    appendLog(`[SYSTEM] 수동 연결: ${row.subtitle_name} → ${target.video_name}`);
+    appendLog(
+        `[SYSTEM] 수동 연결: ${bundle.map((row) => row.subtitle_name).join(', ')} → ${target.video_name}`
+    );
 
-    const attachedRow = target.subtitles.find((item) => item.subtitle_path === subtitlePath);
-    if (attachedRow && attachedRow.status === 'conflict') {
-        appendLog(
-            `[WARN] ${attachedRow.subtitle_name}: 대상 동영상에 같은 이름으로 변경될 자막이 있어 변경 대상에서 제외했습니다.`
-        );
-    }
+    bundle.forEach((row) => {
+        const attachedRow = target.subtitles.find((item) => item.subtitle_path === row.subtitle_path);
+        if (attachedRow && attachedRow.status === 'conflict') {
+            appendLog(
+                `[WARN] ${attachedRow.subtitle_name}: 대상 동영상에 같은 이름으로 변경될 자막이 있어 변경 대상에서 제외했습니다.`
+            );
+        }
+    });
 }
 
 function moveSubtitleToVideo(groupIdx, subtitlePath, direction) {

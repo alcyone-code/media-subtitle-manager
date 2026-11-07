@@ -19,6 +19,7 @@ from subtitle_utils import (
     build_unique_episode_map,
     extract_episode_number,
     get_stem_key,
+    group_subtitle_bundles,
     scan_media_folder,
 )
 
@@ -331,6 +332,52 @@ def test_conflicting_episode_is_skipped_while_others_still_match():
     orphan_subtitles = [row["subtitle_name"] for row in rows if row["subtitle_path"] and not row["video_path"]]
     assert leftover_videos == ["Show - 03.mkv"]
     assert orphan_subtitles == ["Show - 07.5.smi"]
+
+
+def test_group_subtitle_bundles_groups_same_stem():
+    """확장자/언어 코드만 다른 자막은 순서 매칭 전에 한 묶음으로 묶인다."""
+    bundles = group_subtitle_bundles([
+        "Show - 01.smi",
+        "Show - 01.ko.srt",
+        "Show - 02.smi",
+    ])
+
+    assert [sorted(bundle) for bundle in bundles] == [
+        ["Show - 01.ko.srt", "Show - 01.smi"],
+        ["Show - 02.smi"],
+    ]
+
+
+def test_same_stem_subtitles_are_bundled_into_one_video():
+    """확장자/언어 코드만 다른 자막(.smi + .ko.srt)은 같은 동영상에 묶여야 한다."""
+    videos = ["Show - A.mkv", "Show - B.mkv"]
+    subtitles = ["Show - C.smi", "Show - C.ko.srt"]
+
+    rows = build_match_pairs("C:/media", videos, subtitles)
+
+    assert_invariants(rows, videos, subtitles)
+    matched = [row for row in rows if row["video_path"] and row["subtitle_path"]]
+    assert len(matched) == 2
+    assert {row["video_name"] for row in matched} == {"Show - A.mkv"}
+    assert {row["subtitle_name"] for row in matched} == set(subtitles)
+
+    # 남은 동영상은 자막 없이 표시된다
+    leftover_videos = [row["video_name"] for row in rows if row["video_path"] and not row["subtitle_path"]]
+    assert leftover_videos == ["Show - B.mkv"]
+    assert not [row for row in rows if row["subtitle_path"] and not row["video_path"]]
+
+
+def test_bundle_with_different_episode_is_rejected_together():
+    """묶음 자막의 회차가 동영상과 다르면 묶음 전체를 미매칭으로 남긴다."""
+    videos = ["Show - 01.mkv"]
+    subtitles = ["Show - 07.5.smi", "Show - 07.5.ko.srt"]
+
+    rows = build_match_pairs("C:/media", videos, subtitles)
+
+    assert_invariants(rows, videos, subtitles)
+    assert not [row for row in rows if row["video_path"] and row["subtitle_path"]]
+    assert {row["subtitle_name"] for row in rows if row["subtitle_path"]} == set(subtitles)
+    assert [row["video_name"] for row in rows if row["video_path"] and not row["subtitle_path"]] == ["Show - 01.mkv"]
 
 
 def test_subtitles_only_folder(tmp_path):

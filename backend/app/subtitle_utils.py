@@ -133,6 +133,18 @@ def get_stem_key(path: str) -> str:
         stem = stem[:match.start()]
     return stem.strip().lower()
 
+
+def group_subtitle_bundles(subtitles: List[str]) -> List[List[str]]:
+    """
+    확장자/언어 코드만 다른 자막들을 한 묶음으로 묶는다.
+    (예: "Show - 01.smi" + "Show - 01.ko.srt" -> 한 묶음)
+    같은 묶음의 자막은 같은 회차의 자막이므로 항상 같은 동영상에 연결되어야 한다.
+    """
+    bundles: Dict[str, List[str]] = {}
+    for path in sorted(subtitles, key=lambda x: natural_sort_key(os.path.basename(x))):
+        bundles.setdefault(get_stem_key(path), []).append(path)
+    return list(bundles.values())
+
 # ==========================================
 # SMI to SRT 파싱 및 변환 로직 (pysmi2srt 이식)
 # ==========================================
@@ -396,6 +408,9 @@ def build_match_pairs(directory: str, videos: List[str], subtitles: List[str]) -
     3단계에서도 동영상/자막 양쪽 회차가 모두 명확하고 서로 다르면 연결하지 않는다.
     (예: S00E01/E02 동영상만 있는 폴더에 7.5화 특별편 자막만 있는 경우)
     순서만 믿고 붙이면 실제로는 다른 회차인 자막을 잘못된 이름으로 바꾸게 되기 때문이다.
+
+    확장자/언어 코드만 다른 자막(.smi + .ko.srt 등)은 한 묶음으로 취급하여
+    같은 동영상에 함께 연결한다. (묶음이 서로 다른 회차로 쪼개지지 않도록)
     """
     remaining_videos = sorted(videos, key=lambda x: natural_sort_key(os.path.basename(x)))
     remaining_subtitles = sorted(subtitles, key=lambda x: natural_sort_key(os.path.basename(x)))
@@ -440,31 +455,40 @@ def build_match_pairs(directory: str, videos: List[str], subtitles: List[str]) -
             remaining_subtitles.remove(subtitle_path)
         matched_videos.add(video_path)
 
-    # 3단계: 아직 자막이 없는 동영상과 남은 자막을 자연어 정렬 순서대로 1:1 대응.
+    # 3단계: 아직 자막이 없는 동영상과 남은 자막을 자연어 정렬 순서대로 대응.
+    # 확장자/언어 코드만 다른 자막(.smi + .ko.srt)은 같은 회차의 "묶음"으로 취급해
+    # 서로 다른 동영상으로 쪼개지지 않게 한다.
     # 단, 양쪽 모두 회차가 명확한데 서로 다르면(예: E01/E02 동영상 + 7.5화 특별편 자막)
     # 순서만으로 붙이는 것은 잘못된 이름 변경이므로 연결하지 않고 미매칭으로 남긴다.
     leftover_videos = [video_path for video_path in remaining_videos if video_path not in matched_videos]
+    subtitle_bundles = group_subtitle_bundles(remaining_subtitles)
     order_rejected = 0
-    max_len = max(len(leftover_videos), len(remaining_subtitles))
+    max_len = max(len(leftover_videos), len(subtitle_bundles))
     for i in range(max_len):
         video_path = leftover_videos[i] if i < len(leftover_videos) else None
-        subtitle_path = remaining_subtitles[i] if i < len(remaining_subtitles) else None
+        bundle = subtitle_bundles[i] if i < len(subtitle_bundles) else []
 
-        if video_path and subtitle_path:
+        if video_path and bundle:
             video_episode = extract_episode_number(video_path)
-            subtitle_episode = extract_episode_number(subtitle_path)
+            subtitle_episode = extract_episode_number(bundle[0])
             if (
                 video_episode is not None
                 and subtitle_episode is not None
                 and video_episode != subtitle_episode
             ):
-                # 동영상 행과 자막 행을 각각 남겨 미매칭 상태로 표시한다.
+                # 동영상 행과 자막 행들을 각각 남겨 미매칭 상태로 표시한다.
                 pairs.append((video_path, None, MATCH_METHOD_ORDER))
-                pairs.append((None, subtitle_path, MATCH_METHOD_ORDER))
-                order_rejected += 1
+                for subtitle_path in bundle:
+                    pairs.append((None, subtitle_path, MATCH_METHOD_ORDER))
+                order_rejected += len(bundle)
                 continue
 
-        pairs.append((video_path, subtitle_path, MATCH_METHOD_ORDER))
+        if video_path and not bundle:
+            pairs.append((video_path, None, MATCH_METHOD_ORDER))
+            continue
+
+        for subtitle_path in bundle:
+            pairs.append((video_path, subtitle_path, MATCH_METHOD_ORDER))
 
     if order_rejected:
         logger.log(
@@ -487,15 +511,16 @@ def build_match_pairs(directory: str, videos: List[str], subtitles: List[str]) -
             "WARN",
         )
         ordered_videos = sorted(videos, key=lambda x: natural_sort_key(os.path.basename(x)))
-        ordered_subtitles = sorted(subtitles, key=lambda x: natural_sort_key(os.path.basename(x)))
-        pairs = [
-            (
-                ordered_videos[i] if i < len(ordered_videos) else None,
-                ordered_subtitles[i] if i < len(ordered_subtitles) else None,
-                MATCH_METHOD_ORDER,
-            )
-            for i in range(max(len(ordered_videos), len(ordered_subtitles)))
-        ]
+        ordered_bundles = group_subtitle_bundles(subtitles)
+        pairs = []
+        for i in range(max(len(ordered_videos), len(ordered_bundles))):
+            video_path = ordered_videos[i] if i < len(ordered_videos) else None
+            bundle = ordered_bundles[i] if i < len(ordered_bundles) else []
+            if video_path and not bundle:
+                pairs.append((video_path, None, MATCH_METHOD_ORDER))
+                continue
+            for subtitle_path in bundle:
+                pairs.append((video_path, subtitle_path, MATCH_METHOD_ORDER))
 
     rows = [
         _make_match_pair(directory, video_path, subtitle_path, method)
