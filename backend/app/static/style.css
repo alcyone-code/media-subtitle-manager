@@ -581,6 +581,8 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    flex-wrap: wrap;
+    gap: 10px 16px;
     padding: 16px 24px;
     border-bottom: 1px solid var(--card-border);
 }
@@ -591,6 +593,9 @@ body {
     display: flex;
     align-items: center;
     gap: 10px;
+    /* 요약 배지가 늘어나도 제목이 중간에서 줄바꿈되지 않게 한다 */
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .preview-tools {
@@ -704,6 +709,31 @@ body {
     font-size: 0.75rem;
     font-weight: 600;
     border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+/* 상단 요약(변경 예정 + 미매칭) 묶음 */
+.preview-summary {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.preview-summary .badge {
+    white-space: nowrap;
+    cursor: default;
+}
+
+.badge.badge-unmatched {
+    background: rgba(239, 68, 68, 0.14);
+    color: #fca5a5;
+    border-color: rgba(239, 68, 68, 0.3);
+}
+
+.badge.badge-clear {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-muted);
+    border-color: rgba(255, 255, 255, 0.1);
 }
 
 .preview-container {

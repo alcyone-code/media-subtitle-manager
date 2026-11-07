@@ -36,6 +36,7 @@ const elements = {
     // Preview
     previewSection: document.getElementById('preview-section'),
     txtPreviewCount: document.getElementById('txt-preview-count'),
+    txtUnmatchedCount: document.getElementById('txt-unmatched-count'),
     previewList: document.getElementById('preview-list'),
     txtPreviewSearch: document.getElementById('txt-preview-search'),
     txtSearchInfo: document.getElementById('txt-search-info'),
@@ -1024,14 +1025,51 @@ function refreshMatchStatuses(model, manualSubtitlePath) {
     });
 }
 
+// 상단 요약의 미매칭 배지.
+// 미매칭 = 동영상과 연결되지 않은 자막(자동으로 이름이 바뀌지 않는 자막).
+// 같은 회차의 여러 자막(.smi + .ko.srt 등)은 한 "묶음"으로 함께 표시한다.
+function updateUnmatchedBadge(unmatchedSubtitles) {
+    const badge = elements.txtUnmatchedCount;
+    if (!badge) return;
+
+    const bundleCount = groupSubtitleBundles(unmatchedSubtitles).length;
+    const hint = "미리보기의 '동영상이 없는 자막'에서 직접 연결할 수 있습니다.";
+
+    if (unmatchedSubtitles.length === 0) {
+        badge.textContent = '미매칭 없음';
+        badge.classList.remove('badge-unmatched');
+        badge.classList.add('badge-clear');
+        badge.title = `동영상과 연결되지 않은 자막이 없습니다.`;
+        return;
+    }
+
+    const names = unmatchedSubtitles.slice(0, 5).map((row) => row.subtitle_name);
+    const rest = unmatchedSubtitles.length - names.length;
+    badge.textContent = `미매칭 ${unmatchedSubtitles.length}개(${bundleCount}묶음)`;
+    badge.classList.remove('badge-clear');
+    badge.classList.add('badge-unmatched');
+    badge.title = [
+        `동영상과 연결되지 않은 자막 ${unmatchedSubtitles.length}개(${bundleCount}묶음)`,
+        ...names,
+        ...(rest > 0 ? [`외 ${rest}개`] : []),
+        '',
+        hint
+    ].join('\n');
+}
+
 function updatePreviewSummary() {
     const subtitles = collectAllSubtitles(state.previewModel);
     const readySubtitles = subtitles.filter((row) => row.status === 'ready');
+    // 동영상이 없는 자막만 집계한다 (동영상만 있고 자막이 없는 경우는 미매칭 배지와 무관)
+    const unmatchedSubtitles = subtitles.filter(
+        (row) => row.status === 'unmatched' && row.subtitle_path
+    );
     const selectedSubtitles = readySubtitles.filter(
         (row) => !state.excludedSubtitles.has(row.subtitle_path)
     );
 
     elements.txtPreviewCount.textContent = `자막 ${readySubtitles.length}개 변경 예정`;
+    updateUnmatchedBadge(unmatchedSubtitles);
     elements.btnExecuteSync.disabled = selectedSubtitles.length === 0;
     elements.btnExecuteSync.innerHTML = selectedSubtitles.length
         ? `<i class="fa-solid fa-file-signature"></i> 선택한 자막 ${selectedSubtitles.length}개 이름 변경`
